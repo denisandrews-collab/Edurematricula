@@ -1,0 +1,6 @@
+{
+  "name": "Rematrícula Escolar Digital",
+  "description": "Sistema completo de rematrícula escolar automatizada com alimentação por planilha, contratos dinâmicos, assinatura digital via API Autentique e checkout de pagamento via API Itaú (Pix, Cartão e Boleto).",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
