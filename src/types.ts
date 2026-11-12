@@ -5,7 +5,9 @@ export type StudentStatus =
   | 'assinado'
   | 'pagamento_pendente'
   | 'pago'
-  | 'matricula_confirmada';
+  | 'matricula_confirmada'
+  | 'concluido'
+  | 'em_processamento';
 
 export interface StudentHistoryLog {
   timestamp: string;
@@ -148,6 +150,15 @@ export interface ContractTemplate {
   lastUpdated: string;
 }
 
+export interface PortalEditablePermissions {
+  allowAddress: boolean;
+  allowPhone: boolean;
+  allowEmail: boolean;
+  allowSecondResponsible: boolean;
+  allowKinship: boolean;
+  allowStudentAcademic: boolean;
+}
+
 export interface IntegrationSettings {
   autentique: {
     apiKey: string;
@@ -173,7 +184,10 @@ export interface IntegrationSettings {
     token: string;
     sandbox: boolean;
     enabled: boolean;
+    softDescriptor?: string;
+    pixDiscountPercent?: number;
   };
+  portalPermissions?: PortalEditablePermissions;
 }
 
 export interface ColumnMapping {

@@ -1,5 +1,14 @@
-import { Student, ContractTemplate, IntegrationSettings } from '../types';
+import { Student, ContractTemplate, IntegrationSettings, PortalEditablePermissions } from '../types';
 import { DEFAULT_INSTALLMENT_TIERS, DEFAULT_PROPOSAL_CAMPAIGN } from '../utils/installmentHelper';
+
+export const DEFAULT_PORTAL_PERMISSIONS: PortalEditablePermissions = {
+  allowAddress: true,
+  allowPhone: true,
+  allowEmail: true,
+  allowSecondResponsible: false,
+  allowKinship: false,
+  allowStudentAcademic: false,
+};
 
 export const DEFAULT_CONTRACT_TEMPLATE: ContractTemplate = {
   id: 'template_padrao_2026',
@@ -457,4 +466,5 @@ export const INITIAL_INTEGRATION_SETTINGS: IntegrationSettings = {
     sandbox: true,
     enabled: true,
   },
+  portalPermissions: DEFAULT_PORTAL_PERMISSIONS,
 };

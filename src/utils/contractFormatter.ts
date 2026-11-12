@@ -118,71 +118,230 @@ export function replaceContractPlaceholders(
   const resp2Phone = safeStudent.responsible2Phone || safeStudent.responsiblePhone || '---';
   const resp2Address = safeStudent.responsible2Address || safeStudent.responsibleAddress || '---';
 
+  const baseVal = safeStudent.tuitionValue || safeStudent.baseValue || safeStudent.finalValue || 0;
+  const descVal = safeStudent.discountValue || 0;
+  const finalVal = safeStudent.finalValue || Math.max(0, baseVal - descVal);
+
   const replacements: Record<string, string> = {
+    // Aluno
     '{{NOME_ALUNO}}': safeStudent.name || '---',
+    '{NOME_ALUNO}': safeStudent.name || '---',
+    '{{ALUNO_NOME}}': safeStudent.name || '---',
+    '{ALUNO_NOME}': safeStudent.name || '---',
+    '{{ALUNO}}': safeStudent.name || '---',
+    '{ALUNO}': safeStudent.name || '---',
+    '{{NOME_DO_ALUNO}}': safeStudent.name || '---',
+    '{NOME_DO_ALUNO}': safeStudent.name || '---',
+
     '{{RA}}': safeStudent.ra || '---',
+    '{RA}': safeStudent.ra || '---',
+    '{{MATRICULA}}': safeStudent.ra || '---',
+    '{MATRICULA}': safeStudent.ra || '---',
+    '{{REGISTRO_ACADEMICO}}': safeStudent.ra || '---',
+    '{REGISTRO_ACADEMICO}': safeStudent.ra || '---',
+
     '{{SERIE}}': safeStudent.serie || '---',
+    '{SERIE}': safeStudent.serie || '---',
+    '{{ANO_ESCOLAR}}': safeStudent.serie || '---',
+    '{ANO_ESCOLAR}': safeStudent.serie || '---',
+    '{{SERIE_ANO}}': safeStudent.serie || '---',
+    '{SERIE_ANO}': safeStudent.serie || '---',
+
     '{{TURMA}}': safeStudent.turma || 'Turma Regular',
+    '{TURMA}': safeStudent.turma || 'Turma Regular',
     '{{TURNO}}': safeStudent.shift || 'Matutino',
+    '{TURNO}': safeStudent.shift || 'Matutino',
+
     '{{DATA_NASCIMENTO}}': safeStudent.birthDate ? formatDateBr(safeStudent.birthDate) : 'Não informada',
+    '{DATA_NASCIMENTO}': safeStudent.birthDate ? formatDateBr(safeStudent.birthDate) : 'Não informada',
+    '{{NASCIMENTO_ALUNO}}': safeStudent.birthDate ? formatDateBr(safeStudent.birthDate) : 'Não informada',
+    '{NASCIMENTO_ALUNO}': safeStudent.birthDate ? formatDateBr(safeStudent.birthDate) : 'Não informada',
+    '{{NASCIMENTO}}': safeStudent.birthDate ? formatDateBr(safeStudent.birthDate) : 'Não informada',
+    '{NASCIMENTO}': safeStudent.birthDate ? formatDateBr(safeStudent.birthDate) : 'Não informada',
+
     '{{ANO_LETIVO}}': safeStudent.academicYear || safeTemplate.academicYear || '2026',
+    '{ANO_LETIVO}': safeStudent.academicYear || safeTemplate.academicYear || '2026',
 
     // 1º Responsável (Contratante 1)
     '{{NOME_RESPONSAVEL}}': safeStudent.responsibleName || '---',
-    '{{CPF_RESPONSAVEL}}': safeStudent.responsibleCpf || '---',
+    '{NOME_RESPONSAVEL}': safeStudent.responsibleName || '---',
+    '{{RESPONSAVEL_NOME}}': safeStudent.responsibleName || '---',
+    '{RESPONSAVEL_NOME}': safeStudent.responsibleName || '---',
+    '{{NOME_RESPONSAVEL_1}}': safeStudent.responsibleName || '---',
+    '{NOME_RESPONSAVEL_1}': safeStudent.responsibleName || '---',
+    '{{RESPONSAVEL}}': safeStudent.responsibleName || '---',
+    '{RESPONSAVEL}': safeStudent.responsibleName || '---',
+
+    '{{CPF_RESPONSAVEL}}': safeStudent.responsibleCpf ? formatCpf(safeStudent.responsibleCpf) : '---',
+    '{CPF_RESPONSAVEL}': safeStudent.responsibleCpf ? formatCpf(safeStudent.responsibleCpf) : '---',
+    '{{CPF_RESPONSAVEL_1}}': safeStudent.responsibleCpf ? formatCpf(safeStudent.responsibleCpf) : '---',
+    '{CPF_RESPONSAVEL_1}': safeStudent.responsibleCpf ? formatCpf(safeStudent.responsibleCpf) : '---',
+    '{{RESPONSAVEL_CPF}}': safeStudent.responsibleCpf ? formatCpf(safeStudent.responsibleCpf) : '---',
+    '{RESPONSAVEL_CPF}': safeStudent.responsibleCpf ? formatCpf(safeStudent.responsibleCpf) : '---',
+    '{{CPF}}': safeStudent.responsibleCpf ? formatCpf(safeStudent.responsibleCpf) : '---',
+    '{CPF}': safeStudent.responsibleCpf ? formatCpf(safeStudent.responsibleCpf) : '---',
+
     '{{RG_RESPONSAVEL}}': safeStudent.responsibleRg || 'Não informado',
+    '{RG_RESPONSAVEL}': safeStudent.responsibleRg || 'Não informado',
+    '{{RG_RESPONSAVEL_1}}': safeStudent.responsibleRg || 'Não informado',
+    '{RG_RESPONSAVEL_1}': safeStudent.responsibleRg || 'Não informado',
+    '{{RESPONSAVEL_RG}}': safeStudent.responsibleRg || 'Não informado',
+    '{RESPONSAVEL_RG}': safeStudent.responsibleRg || 'Não informado',
+    '{{RG}}': safeStudent.responsibleRg || 'Não informado',
+    '{RG}': safeStudent.responsibleRg || 'Não informado',
+
     '{{PARENTESCO_RESPONSAVEL_1}}': safeStudent.responsibleKinship || 'Responsável Legal Principal',
+    '{PARENTESCO_RESPONSAVEL_1}': safeStudent.responsibleKinship || 'Responsável Legal Principal',
+    '{{PARENTESCO_RESP_1}}': safeStudent.responsibleKinship || 'Responsável Legal Principal',
+    '{PARENTESCO_RESP_1}': safeStudent.responsibleKinship || 'Responsável Legal Principal',
+    '{{PARENTESCO}}': safeStudent.responsibleKinship || 'Responsável Legal Principal',
+    '{PARENTESCO}': safeStudent.responsibleKinship || 'Responsável Legal Principal',
+
     '{{EMAIL_RESPONSAVEL}}': safeStudent.responsibleEmail || '---',
-    '{{TELEFONE_RESPONSAVEL}}': safeStudent.responsiblePhone || '---',
+    '{EMAIL_RESPONSAVEL}': safeStudent.responsibleEmail || '---',
+    '{{EMAIL_RESPONSAVEL_1}}': safeStudent.responsibleEmail || '---',
+    '{EMAIL_RESPONSAVEL_1}': safeStudent.responsibleEmail || '---',
+    '{{EMAIL}}': safeStudent.responsibleEmail || '---',
+    '{EMAIL}': safeStudent.responsibleEmail || '---',
+
+    '{{TELEFONE_RESPONSAVEL}}': safeStudent.responsiblePhone ? formatPhone(safeStudent.responsiblePhone) : '---',
+    '{TELEFONE_RESPONSAVEL}': safeStudent.responsiblePhone ? formatPhone(safeStudent.responsiblePhone) : '---',
+    '{{TELEFONE_RESPONSAVEL_1}}': safeStudent.responsiblePhone ? formatPhone(safeStudent.responsiblePhone) : '---',
+    '{TELEFONE_RESPONSAVEL_1}': safeStudent.responsiblePhone ? formatPhone(safeStudent.responsiblePhone) : '---',
+    '{{TELEFONE}}': safeStudent.responsiblePhone ? formatPhone(safeStudent.responsiblePhone) : '---',
+    '{TELEFONE}': safeStudent.responsiblePhone ? formatPhone(safeStudent.responsiblePhone) : '---',
+    '{{WHATSAPP}}': safeStudent.responsiblePhone ? formatPhone(safeStudent.responsiblePhone) : '---',
+    '{WHATSAPP}': safeStudent.responsiblePhone ? formatPhone(safeStudent.responsiblePhone) : '---',
+
     '{{ENDERECO_RESPONSAVEL}}': safeStudent.responsibleAddress || '---',
+    '{ENDERECO_RESPONSAVEL}': safeStudent.responsibleAddress || '---',
+    '{{ENDERECO_RESPONSAVEL_1}}': safeStudent.responsibleAddress || '---',
+    '{ENDERECO_RESPONSAVEL_1}': safeStudent.responsibleAddress || '---',
+    '{{ENDERECO}}': safeStudent.responsibleAddress || '---',
+    '{ENDERECO}': safeStudent.responsibleAddress || '---',
 
     // 2º Responsável (Contratante 2)
     '{{NOME_RESPONSAVEL_2}}': resp2Name,
-    '{{CPF_RESPONSAVEL_2}}': resp2Cpf,
+    '{NOME_RESPONSAVEL_2}': resp2Name,
+    '{{RESPONSAVEL_2_NOME}}': resp2Name,
+    '{RESPONSAVEL_2_NOME}': resp2Name,
+    '{{RESPONSAVEL_2}}': resp2Name,
+    '{RESPONSAVEL_2}': resp2Name,
+
+    '{{CPF_RESPONSAVEL_2}}': resp2Cpf !== '---' ? formatCpf(resp2Cpf) : '---',
+    '{CPF_RESPONSAVEL_2}': resp2Cpf !== '---' ? formatCpf(resp2Cpf) : '---',
+    '{{RESPONSAVEL_2_CPF}}': resp2Cpf !== '---' ? formatCpf(resp2Cpf) : '---',
+    '{RESPONSAVEL_2_CPF}': resp2Cpf !== '---' ? formatCpf(resp2Cpf) : '---',
+
     '{{RG_RESPONSAVEL_2}}': safeStudent.responsible2Rg || 'Não informado',
+    '{RG_RESPONSAVEL_2}': safeStudent.responsible2Rg || 'Não informado',
+
     '{{PARENTESCO_RESPONSAVEL_2}}': safeStudent.responsible2Kinship || 'Co-Responsável Solidário',
+    '{PARENTESCO_RESPONSAVEL_2}': safeStudent.responsible2Kinship || 'Co-Responsável Solidário',
+    '{{PARENTESCO_RESP_2}}': safeStudent.responsible2Kinship || 'Co-Responsável Solidário',
+    '{PARENTESCO_RESP_2}': safeStudent.responsible2Kinship || 'Co-Responsável Solidário',
+
     '{{EMAIL_RESPONSAVEL_2}}': resp2Email,
-    '{{TELEFONE_RESPONSAVEL_2}}': resp2Phone,
+    '{EMAIL_RESPONSAVEL_2}': resp2Email,
+    '{{TELEFONE_RESPONSAVEL_2}}': resp2Phone !== '---' ? formatPhone(resp2Phone) : '---',
+    '{TELEFONE_RESPONSAVEL_2}': resp2Phone !== '---' ? formatPhone(resp2Phone) : '---',
     '{{ENDERECO_RESPONSAVEL_2}}': resp2Address,
+    '{ENDERECO_RESPONSAVEL_2}': resp2Address,
 
     // Valores
-    '{{VALOR_REMATRICULA}}': formatCurrency(safeStudent.tuitionValue || 0),
-    '{{VALOR_DESCONTO}}': formatCurrency(safeStudent.discountValue || 0),
-    '{{VALOR_FINAL}}': formatCurrency(safeStudent.finalValue || 0),
+    '{{VALOR_REMATRICULA}}': formatCurrency(baseVal),
+    '{VALOR_REMATRICULA}': formatCurrency(baseVal),
+    '{{VALOR_MENSALIDADE}}': formatCurrency(baseVal),
+    '{VALOR_MENSALIDADE}': formatCurrency(baseVal),
+    '{{MENSALIDADE}}': formatCurrency(baseVal),
+    '{MENSALIDADE}': formatCurrency(baseVal),
+
+    '{{VALOR_DESCONTO}}': formatCurrency(descVal),
+    '{VALOR_DESCONTO}': formatCurrency(descVal),
+    '{{DESCONTO}}': formatCurrency(descVal),
+    '{DESCONTO}': formatCurrency(descVal),
+
+    '{{VALOR_FINAL}}': formatCurrency(finalVal),
+    '{VALOR_FINAL}': formatCurrency(finalVal),
+    '{{VALOR_LIQUIDO}}': formatCurrency(finalVal),
+    '{VALOR_LIQUIDO}': formatCurrency(finalVal),
+    '{{VALOR_TOTAL}}': formatCurrency(finalVal),
+    '{VALOR_TOTAL}': formatCurrency(finalVal),
+    '{{VALOR}}': formatCurrency(finalVal),
+    '{VALOR}': formatCurrency(finalVal),
+
     '{{DATA_VENCIMENTO}}': formatDateBr(safeStudent.dueDate),
+    '{DATA_VENCIMENTO}': formatDateBr(safeStudent.dueDate),
+    '{{VENCIMENTO}}': formatDateBr(safeStudent.dueDate),
+    '{VENCIMENTO}': formatDateBr(safeStudent.dueDate),
+
     '{{TABELA_PARCELAMENTO}}': formatTiersSummary(
       getEffectiveInstallmentTiers(safeStudent),
-      safeStudent.baseValue || safeStudent.finalValue || 2000
+      baseVal || 2000
     ),
+    '{TABELA_PARCELAMENTO}': formatTiersSummary(
+      getEffectiveInstallmentTiers(safeStudent),
+      baseVal || 2000
+    ),
+
     '{{PLANO_SELECIONADO}}': safeStudent.selectedInstallments
-      ? `${safeStudent.selectedInstallments}x de ${formatCurrency(safeStudent.selectedInstallmentValue || safeStudent.finalValue / safeStudent.selectedInstallments)} (Total: ${formatCurrency(safeStudent.selectedTotalAmount || safeStudent.finalValue)})`
-      : `À vista (${formatCurrency(safeStudent.finalValue || 0)}) ou parcelado conforme opções do portal`,
+      ? `${safeStudent.selectedInstallments}x de ${formatCurrency(safeStudent.selectedInstallmentValue || finalVal / safeStudent.selectedInstallments)} (Total: ${formatCurrency(safeStudent.selectedTotalAmount || finalVal)})`
+      : `À vista (${formatCurrency(finalVal)}) ou parcelado em até 12x via Gateway e.Rede Itaú`,
+    '{PLANO_SELECIONADO}': safeStudent.selectedInstallments
+      ? `${safeStudent.selectedInstallments}x de ${formatCurrency(safeStudent.selectedInstallmentValue || finalVal / safeStudent.selectedInstallments)} (Total: ${formatCurrency(safeStudent.selectedTotalAmount || finalVal)})`
+      : `À vista (${formatCurrency(finalVal)}) ou parcelado em até 12x via Gateway e.Rede Itaú`,
 
     // Contratada (Fixa)
     '{{NOME_ESCOLA}}': safeTemplate.schoolName || 'COLÉGIO MODELO ALPHA DE EDUCAÇÃO BÁSICA LTDA',
+    '{NOME_ESCOLA}': safeTemplate.schoolName || 'COLÉGIO MODELO ALPHA DE EDUCAÇÃO BÁSICA LTDA',
+    '{{ESCOLA}}': safeTemplate.schoolName || 'COLÉGIO MODELO ALPHA DE EDUCAÇÃO BÁSICA LTDA',
+    '{ESCOLA}': safeTemplate.schoolName || 'COLÉGIO MODELO ALPHA DE EDUCAÇÃO BÁSICA LTDA',
+
     '{{CNPJ_ESCOLA}}': safeTemplate.schoolCnpj || '12.345.678/0001-90',
+    '{CNPJ_ESCOLA}': safeTemplate.schoolCnpj || '12.345.678/0001-90',
+    '{{CNPJ}}': safeTemplate.schoolCnpj || '12.345.678/0001-90',
+    '{CNPJ}': safeTemplate.schoolCnpj || '12.345.678/0001-90',
+
     '{{ENDERECO_ESCOLA}}': safeTemplate.schoolAddress || 'Avenida Paulista, 1500 - Bela Vista',
+    '{ENDERECO_ESCOLA}': safeTemplate.schoolAddress || 'Avenida Paulista, 1500 - Bela Vista',
     '{{CIDADE_ESCOLA}}': safeTemplate.schoolCity || 'São Paulo',
+    '{CIDADE_ESCOLA}': safeTemplate.schoolCity || 'São Paulo',
     '{{UF_ESCOLA}}': safeTemplate.schoolState || 'SP',
+    '{UF_ESCOLA}': safeTemplate.schoolState || 'SP',
+
     '{{REPRESENTANTE_ESCOLA}}': safeTemplate.schoolRepresentative || 'Prof. Carlos Eduardo Silveira',
+    '{REPRESENTANTE_ESCOLA}': safeTemplate.schoolRepresentative || 'Prof. Carlos Eduardo Silveira',
     '{{CPF_REPRESENTANTE_ESCOLA}}': safeTemplate.schoolRepresentativeCpf || '111.222.333-44',
+    '{CPF_REPRESENTANTE_ESCOLA}': safeTemplate.schoolRepresentativeCpf || '111.222.333-44',
     '{{CARGO_REPRESENTANTE_ESCOLA}}': safeTemplate.schoolRepresentativeRole || 'Diretor Geral e Representante Legal',
+    '{CARGO_REPRESENTANTE_ESCOLA}': safeTemplate.schoolRepresentativeRole || 'Diretor Geral e Representante Legal',
 
     // Testemunhas (Fixas)
     '{{NOME_TESTEMUNHA_1}}': safeTemplate.witness1Name || 'Mariana Souza Prado',
+    '{NOME_TESTEMUNHA_1}': safeTemplate.witness1Name || 'Mariana Souza Prado',
     '{{CPF_TESTEMUNHA_1}}': safeTemplate.witness1Cpf || '444.555.666-77',
+    '{CPF_TESTEMUNHA_1}': safeTemplate.witness1Cpf || '444.555.666-77',
     '{{CARGO_TESTEMUNHA_1}}': safeTemplate.witness1Role || 'Secretária Acadêmica',
+    '{CARGO_TESTEMUNHA_1}': safeTemplate.witness1Role || 'Secretária Acadêmica',
+
     '{{NOME_TESTEMUNHA_2}}': safeTemplate.witness2Name || 'Rodrigo Fernandes Alencar',
+    '{NOME_TESTEMUNHA_2}': safeTemplate.witness2Name || 'Rodrigo Fernandes Alencar',
     '{{CPF_TESTEMUNHA_2}}': safeTemplate.witness2Cpf || '777.888.999-00',
+    '{CPF_TESTEMUNHA_2}}': safeTemplate.witness2Cpf || '777.888.999-00',
     '{{CARGO_TESTEMUNHA_2}}': safeTemplate.witness2Role || 'Coordenador Financeiro',
+    '{CARGO_TESTEMUNHA_2}': safeTemplate.witness2Role || 'Coordenador Financeiro',
 
     '{{DATA_HOJE}}': formattedToday,
+    '{DATA_HOJE}': formattedToday,
+    '{{DATA_EXTENSO}}': formattedToday,
+    '{DATA_EXTENSO}': formattedToday,
   };
 
   // Add custom fields if any
   if (safeStudent.customFields) {
     for (const [key, val] of Object.entries(safeStudent.customFields)) {
       replacements[`{{${key.toUpperCase()}}}`] = String(val);
+      replacements[`{${key.toUpperCase()}}`] = String(val);
     }
   }
 
@@ -190,6 +349,10 @@ export function replaceContractPlaceholders(
   for (const [tag, val] of Object.entries(replacements)) {
     result = result.split(tag).join(val);
   }
+
+  // Strict Cleanup: Remove any residual raw curly brackets tags like {{TAG}} or {TAG} so parents never see unformatted placeholder codes
+  result = result.replace(/\{\{[A-Za-z0-9_ -]+\}\}/g, '---');
+  result = result.replace(/\{[A-Z0-9_]{3,}\}/g, '---');
 
   return result;
 }

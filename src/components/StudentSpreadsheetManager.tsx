@@ -1,7 +1,20 @@
 import React, { useState } from 'react';
 import * as XLSX from 'xlsx';
 import { Student, StudentStatus, ContractTemplate } from '../types';
-import { formatCurrency, formatDateBr, formatCpf, formatPhone, exportStudentsToCSV, exportStudentsToExcel } from '../utils/contractFormatter';
+import {
+  formatCurrency,
+  formatDateBr,
+  formatCpf,
+  formatPhone,
+  exportStudentsToCSV,
+  exportStudentsToExcel,
+} from '../utils/contractFormatter';
+import {
+  checkDuplicateEnrollment,
+  validateNewEnrollment,
+  filterNewEnrollmentsBatch,
+  getStatusHumanDescription,
+} from '../utils/studentValidation';
 import { EditStudentModal } from './EditStudentModal';
 import {
   Upload,
@@ -93,6 +106,21 @@ export function StudentSpreadsheetManager({
     dueDate: '2026-09-10',
     status: 'importado',
   });
+
+  // Lista de alunos bloqueados na última importação por duplicidade com status restritivo
+  const [blockedImportList, setBlockedImportList] = useState<
+    {
+      candidate: Student;
+      reason: string;
+      conflictingStudent: Student;
+      conflictField: 'CPF' | 'MATRICULA' | 'AMBOS';
+      statusCategory: 'concluído' | 'em processamento';
+    }[]
+  >([]);
+  const [isBlockedModalOpen, setIsBlockedModalOpen] = useState(false);
+
+  // Verificação em tempo real de duplicidade no formulário de cadastro manual (CPF e Matrícula)
+  const duplicateCheck = checkDuplicateEnrollment(newStudent, students);
 
   const seriesList = Array.from(new Set(students.map((s) => s.serie))).filter(Boolean);
 
@@ -297,10 +325,31 @@ export function StudentSpreadsheetManager({
 
         const valid = parsed.filter((s) => s.name && !s.name.toUpperCase().includes('NOME_ALUNO'));
         if (valid.length > 0) {
-          onUpdateStudents([...valid, ...students]);
-          setIsImportModalOpen(false);
-          setRawCsvText('');
-          showLocalFeedback(`${valid.length} alunos importados com sucesso da planilha Excel (.xlsx)!`, 'success');
+          const { valid: allowedStudents, blocked } = filterNewEnrollmentsBatch(valid, students);
+
+          if (blocked.length > 0) {
+            setBlockedImportList(blocked);
+            setIsBlockedModalOpen(true);
+          }
+
+          if (allowedStudents.length > 0) {
+            onUpdateStudents([...allowedStudents, ...students]);
+            setIsImportModalOpen(false);
+            setRawCsvText('');
+            if (blocked.length > 0) {
+              showLocalFeedback(
+                `${allowedStudents.length} alunos importados. ${blocked.length} registro(s) foram bloqueados pois já constam com rematrícula concluída ou em processamento.`,
+                'info'
+              );
+            } else {
+              showLocalFeedback(`${allowedStudents.length} alunos importados com sucesso da planilha Excel (.xlsx)!`, 'success');
+            }
+          } else {
+            showLocalFeedback(
+              `Importação bloqueada: Todos os ${blocked.length} registros no arquivo já possuem rematrícula com status 'concluído' ou 'em processamento'.`,
+              'error'
+            );
+          }
         } else {
           showLocalFeedback('Não foi possível identificar linhas com dados válidos no Excel.', 'error');
         }
@@ -353,6 +402,16 @@ export function StudentSpreadsheetManager({
         },
       ],
     };
+
+    // Verificação estrita de duplicidade de rematrícula para CPF e Matrícula
+    const validation = validateNewEnrollment(created, students);
+    if (!validation.isValid) {
+      showLocalFeedback(
+        validation.error || 'Criação bloqueada: Já existe rematrícula com status concluído ou em processamento para este CPF/Matrícula.',
+        'error'
+      );
+      return;
+    }
 
     onUpdateStudents([created, ...students]);
     setIsAddingStudent(false);
@@ -506,10 +565,31 @@ export function StudentSpreadsheetManager({
         .filter((s): s is Student => s !== null);
 
       if (parsed.length > 0) {
-        onUpdateStudents([...parsed, ...students]);
-        setIsImportModalOpen(false);
-        setRawCsvText('');
-        showLocalFeedback(`${parsed.length} alunos importados em colunas com sucesso!`, 'success');
+        const { valid: allowedStudents, blocked } = filterNewEnrollmentsBatch(parsed, students);
+
+        if (blocked.length > 0) {
+          setBlockedImportList(blocked);
+          setIsBlockedModalOpen(true);
+        }
+
+        if (allowedStudents.length > 0) {
+          onUpdateStudents([...allowedStudents, ...students]);
+          setIsImportModalOpen(false);
+          setRawCsvText('');
+          if (blocked.length > 0) {
+            showLocalFeedback(
+              `${allowedStudents.length} alunos importados em colunas. ${blocked.length} registro(s) foram bloqueados por duplicidade com status concluído ou em processamento.`,
+              'info'
+            );
+          } else {
+            showLocalFeedback(`${allowedStudents.length} alunos importados em colunas com sucesso!`, 'success');
+          }
+        } else {
+          showLocalFeedback(
+            `Importação bloqueada: Todos os ${blocked.length} registros informados já possuem rematrícula com status 'concluído' ou 'em processamento'.`,
+            'error'
+          );
+        }
       } else {
         showLocalFeedback('Não foi possível identificar registros válidos na planilha informada. Verifique os títulos das colunas.', 'error');
       }
@@ -795,8 +875,19 @@ export function StudentSpreadsheetManager({
                     type="text"
                     value={newStudent.ra}
                     onChange={(e) => setNewStudent({ ...newStudent, ra: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg"
+                    className={`w-full px-3 py-2 border rounded-lg transition-colors ${
+                      duplicateCheck.hasConflict &&
+                      (duplicateCheck.conflictField === 'MATRICULA' || duplicateCheck.conflictField === 'AMBOS')
+                        ? 'border-rose-400 bg-rose-50/60 text-rose-900 focus:ring-2 focus:ring-rose-500 font-medium'
+                        : 'border-slate-200'
+                    }`}
                   />
+                  {duplicateCheck.hasConflict &&
+                    (duplicateCheck.conflictField === 'MATRICULA' || duplicateCheck.conflictField === 'AMBOS') && (
+                      <span className="text-[10px] text-rose-600 font-bold mt-1 block">
+                        ⚠️ Matrícula já em uso com status '{duplicateCheck.statusCategory}'
+                      </span>
+                    )}
                 </div>
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">Série / Ano *</label>
@@ -857,8 +948,19 @@ export function StudentSpreadsheetManager({
                     value={newStudent.responsibleCpf}
                     onChange={(e) => setNewStudent({ ...newStudent, responsibleCpf: e.target.value })}
                     placeholder="000.000.000-00"
-                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg"
+                    className={`w-full px-3 py-2 bg-white border rounded-lg transition-colors ${
+                      duplicateCheck.hasConflict &&
+                      (duplicateCheck.conflictField === 'CPF' || duplicateCheck.conflictField === 'AMBOS')
+                        ? 'border-rose-400 bg-rose-50/60 text-rose-900 focus:ring-2 focus:ring-rose-500 font-medium'
+                        : 'border-slate-200'
+                    }`}
                   />
+                  {duplicateCheck.hasConflict &&
+                    (duplicateCheck.conflictField === 'CPF' || duplicateCheck.conflictField === 'AMBOS') && (
+                      <span className="text-[10px] text-rose-600 font-bold mt-1 block">
+                        ⚠️ CPF já em uso com status '{duplicateCheck.statusCategory}'
+                      </span>
+                    )}
                 </div>
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">E-mail para Assinatura *</label>
@@ -1005,19 +1107,61 @@ export function StudentSpreadsheetManager({
             </div>
           </div>
 
+          {/* Banner de Bloqueio por Duplicidade com Status Concluído ou Em Processamento */}
+          {duplicateCheck.hasConflict && (
+            <div className="p-4 bg-rose-50 border-2 border-rose-300 rounded-xl text-xs text-rose-900 shadow-xs flex items-start gap-3 animate-fade-in">
+              <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+              <div className="space-y-1.5 flex-1">
+                <div className="flex items-center justify-between">
+                  <strong className="text-rose-800 text-sm flex items-center gap-2">
+                    <span>Bloqueio de Criação de Rematrícula</span>
+                  </strong>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-rose-200 text-rose-900 tracking-wider">
+                    Status: {duplicateCheck.statusCategory}
+                  </span>
+                </div>
+                <p className="text-rose-700 leading-relaxed font-medium">
+                  {duplicateCheck.reason}
+                </p>
+                {duplicateCheck.conflictingStudent && (
+                  <div className="pt-2 border-t border-rose-200 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                    <span className="text-rose-800">
+                      Aluno já existente: <strong>{duplicateCheck.conflictingStudent.name}</strong> • Situação Atual:{' '}
+                      <strong>{getStatusHumanDescription(duplicateCheck.conflictingStudent.status)}</strong>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => onSelectStudent(duplicateCheck.conflictingStudent!)}
+                      className="text-rose-900 font-bold hover:underline inline-flex items-center gap-1 cursor-pointer"
+                    >
+                      Ver cadastro do aluno existente <ExternalLink className="w-3 h-3" />
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           <div className="flex justify-end space-x-2 pt-3 border-t border-slate-100">
             <button
               type="button"
               onClick={() => setIsAddingStudent(false)}
-              className="px-4 py-2 border border-slate-200 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-50"
+              className="px-4 py-2 border border-slate-200 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-50 cursor-pointer"
             >
               Cancelar
             </button>
             <button
               type="submit"
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold shadow-xs"
+              disabled={duplicateCheck.hasConflict}
+              className={`px-4 py-2 rounded-xl text-xs font-semibold shadow-xs flex items-center gap-1.5 transition-all ${
+                duplicateCheck.hasConflict
+                  ? 'bg-slate-200 text-slate-400 cursor-not-allowed border border-slate-300'
+                  : 'bg-blue-600 hover:bg-blue-700 text-white cursor-pointer'
+              }`}
+              title={duplicateCheck.hasConflict ? duplicateCheck.reason : 'Salvar Aluno na Planilha'}
             >
-              Salvar Aluno na Planilha
+              <Plus className="w-3.5 h-3.5" />
+              <span>Salvar Aluno na Planilha</span>
             </button>
           </div>
         </form>
@@ -1376,6 +1520,87 @@ Thiago Oliveira Dias,RA-2026-9902,3º Ano Ensino Médio,3º B,Matutino,Lucia Oli
           onOpenPortal={onOpenPortal}
           template={template}
         />
+      )}
+
+      {/* Modal de Rematrículas Bloqueadas por Duplicidade (Status Concluído ou Em Processamento) */}
+      {isBlockedModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto animate-fade-in">
+          <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl space-y-4 border border-rose-200">
+            <div className="flex items-center justify-between pb-3 border-b border-rose-100">
+              <div className="flex items-center gap-2.5 text-rose-700">
+                <AlertCircle className="w-6 h-6 text-rose-600 shrink-0" />
+                <div>
+                  <h3 className="font-extrabold text-slate-900 text-base">
+                    Rematrículas Bloqueadas por Duplicidade
+                  </h3>
+                  <p className="text-xs text-rose-600 font-medium">
+                    {blockedImportList.length} registro(s) impedidos de criação para garantir a integridade cadastral
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsBlockedModalOpen(false)}
+                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center text-sm font-bold cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed">
+              O sistema detectou que os seguintes alunos importados possuem <strong>CPF</strong> ou <strong>Matrícula (RA)</strong> idênticos a registros que já estão em <strong>processamento</strong> (contrato gerado, aguardando assinatura ou pagamento) ou <strong>concluídos</strong> (matrícula confirmada / paga). A duplicação foi bloqueada automaticamente.
+            </p>
+
+            <div className="max-h-72 overflow-y-auto divide-y divide-slate-100 border border-slate-200 rounded-xl">
+              {blockedImportList.map((item, idx) => (
+                <div key={idx} className="p-3.5 bg-slate-50/50 hover:bg-slate-50 space-y-1.5 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-slate-900">
+                      Tentativa de Cadastro: {item.candidate.name}
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-rose-100 text-rose-800 border border-rose-200">
+                      Status: {item.statusCategory}
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-slate-500 flex flex-wrap gap-x-4 gap-y-1">
+                    <span>RA Informado: <strong className="font-mono text-slate-700">{item.candidate.ra || 'N/A'}</strong></span>
+                    <span>CPF Informado: <strong className="font-mono text-slate-700">{item.candidate.responsibleCpf || 'N/A'}</strong></span>
+                    <span>Campo Conflitante: <strong className="text-rose-700 font-semibold">{item.conflictField}</strong></span>
+                  </div>
+                  <div className="p-2.5 bg-white rounded-lg border border-slate-200 text-[11px] text-slate-700">
+                    <div className="font-semibold text-slate-900 mb-0.5">Aluno já existente no sistema:</div>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span>
+                        <strong>{item.conflictingStudent.name}</strong> (RA: {item.conflictingStudent.ra}) • Situação:{' '}
+                        <span className="text-rose-700 font-bold">{getStatusHumanDescription(item.conflictingStudent.status)}</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsBlockedModalOpen(false);
+                          onSelectStudent(item.conflictingStudent);
+                        }}
+                        className="text-blue-600 hover:text-blue-800 font-bold underline flex items-center gap-1 cursor-pointer"
+                      >
+                        Abrir Ficha do Aluno <ExternalLink className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex justify-end pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setIsBlockedModalOpen(false)}
+                className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-semibold shadow-xs cursor-pointer"
+              >
+                Entendido
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

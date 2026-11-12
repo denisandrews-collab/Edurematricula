@@ -11,6 +11,7 @@ import {
   INITIAL_INTEGRATION_SETTINGS,
 } from './data/initialData';
 import { apiService } from './services/apiService';
+import { validateNewEnrollment, filterNewEnrollmentsBatch } from './utils/studentValidation';
 import { Navbar } from './components/Navbar';
 import { StudentSpreadsheetManager } from './components/StudentSpreadsheetManager';
 import { ContractTemplateEditor } from './components/ContractTemplateEditor';
@@ -203,6 +204,35 @@ export default function App() {
     showToast(`${successCount} contratos gerados e disparados via API Autentique em lote!`);
   };
 
+  // Atualização segura do estado global dos alunos com validação de rematrícula
+  const handleUpdateStudents = (updatedOrNewList: Student[]) => {
+    // Se a lista aumentou de tamanho, novos alunos estão sendo inseridos (manual, lote ou importação)
+    if (updatedOrNewList.length > students.length) {
+      const existingIds = new Set(students.map((s) => s.id));
+      const newlyAddedCandidates = updatedOrNewList.filter((s) => !existingIds.has(s.id));
+
+      const { valid, blocked } = filterNewEnrollmentsBatch(newlyAddedCandidates, students);
+
+      if (blocked.length > 0) {
+        const sampleReason = blocked[0].reason;
+        showToast(
+          `Bloqueio de Rematrícula: ${blocked.length} registro(s) impedido(s) por já possuírem rematrícula em processamento ou concluída.`,
+          'error'
+        );
+        console.warn('Tentativa de criação de rematrícula bloqueada pelo estado global:', blocked);
+
+        // Se houver alunos válidos sem conflito, mescla apenas os válidos
+        if (valid.length > 0) {
+          setStudents([...valid, ...students]);
+          showToast(`${valid.length} nova(s) rematrícula(s) permitida(s) e adicionada(s).`, 'success');
+        }
+        return;
+      }
+    }
+
+    setStudents(updatedOrNewList);
+  };
+
   const handleUpdateStudent = (updatedStudent: Student) => {
     setStudents((prev) => prev.map((s) => (s.id === updatedStudent.id ? updatedStudent : s)));
     setSelectedStudent(updatedStudent);
@@ -257,7 +287,7 @@ export default function App() {
         {currentTab === 'spreadsheet' && (
           <StudentSpreadsheetManager
             students={students}
-            onUpdateStudents={setStudents}
+            onUpdateStudents={handleUpdateStudents}
             onSelectStudent={handleSelectStudentFromTable}
             onOpenPortal={handleOpenPortal}
             onSendAutentique={handleSendAutentique}
