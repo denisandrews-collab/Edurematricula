@@ -190,6 +190,7 @@ export interface CompanyBankConfig {
   agency: string;
   account: string;
   wallet: string;
+  pixDiscountPercent?: number;
 }
 
 export interface CompanyRedeConfig {
@@ -198,6 +199,7 @@ export interface CompanyRedeConfig {
   softDescriptor?: string;
   sandbox?: boolean;
   enabled?: boolean;
+  pixDiscountPercent?: number;
 }
 
 export interface CompanyEntity {

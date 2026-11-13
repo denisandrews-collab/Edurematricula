@@ -8,17 +8,10 @@ import { DEFAULT_REMINDER_TEMPLATE, REMINDER_PLACEHOLDERS } from '../utils/remin
 import {
   Settings,
   ShieldCheck,
-  CreditCard,
   Save,
   CheckCircle,
   Key,
-  Globe,
   RefreshCw,
-  Sparkles,
-  Link2,
-  Layers,
-  Lock,
-  Unlock,
   Home,
   Phone,
   Mail,
@@ -38,11 +31,7 @@ interface Props {
 export function SettingsHub({ settings, onUpdateSettings, students = [] }: Props) {
   const [formSettings, setFormSettings] = useState<IntegrationSettings>(settings);
   const [testResultAutentique, setTestResultAutentique] = useState<string | null>(null);
-  const [testResultItau, setTestResultItau] = useState<string | null>(null);
-  const [testResultRede, setTestResultRede] = useState<string | null>(null);
   const [isTestingAutentique, setIsTestingAutentique] = useState(false);
-  const [isTestingItau, setIsTestingItau] = useState(false);
-  const [isTestingRede, setIsTestingRede] = useState(false);
   const [savedToast, setSavedToast] = useState(false);
 
   const handleSave = () => {
@@ -76,51 +65,6 @@ export function SettingsHub({ settings, onUpdateSettings, students = [] }: Props
     }
   };
 
-  const handleTestItau = async () => {
-    setIsTestingItau(true);
-    setTestResultItau(null);
-    const start = performance.now();
-    try {
-      const res = await fetch('/api/config', { signal: AbortSignal.timeout(4000) });
-      const data = await res.json();
-      const rtt = Math.round(performance.now() - start);
-      setIsTestingItau(false);
-      if (data.itau?.hasEnvCredentials) {
-        setTestResultItau(`Conexão com Gateway Itaú Empresas ativa (${data.itau.environment}) em ${rtt} ms.`);
-      } else {
-        setTestResultItau(`Gateway Itaú Empresas em modo Sandbox ativo (${rtt} ms) com geração de Pix e Boletos.`);
-      }
-    } catch {
-      setIsTestingItau(false);
-      setTestResultItau('Modo Sandbox Itaú ativo com geração de QR Code Pix e Linhas Digitáveis.');
-    }
-  };
-
-  const handleTestRede = async () => {
-    setIsTestingRede(true);
-    setTestResultRede(null);
-    const start = performance.now();
-    try {
-      const res = await fetch('/api/config', { signal: AbortSignal.timeout(4000) });
-      const data = await res.json();
-      const rtt = Math.round(performance.now() - start);
-      setIsTestingRede(false);
-      const hasCustomCreds = Boolean(formSettings.rede?.pv && formSettings.rede?.token);
-      if (data.rede?.hasEnvCredentials || hasCustomCreds) {
-        setTestResultRede(
-          `Conexão com e.Rede Itaú verificada em ${rtt} ms! PV: ${data.rede?.pvMasked || formSettings.rede?.pv} (${
-            data.rede?.sandbox ?? formSettings.rede?.sandbox ? 'Sandbox' : 'Produção'
-          }).`
-        );
-      } else {
-        setTestResultRede(`e.Rede pronto em modo Sandbox/Simulação ativa (${rtt} ms).`);
-      }
-    } catch {
-      setIsTestingRede(false);
-      setTestResultRede('Modo Simulação e.Rede ativo com emissão de Pix e autorização de cartões.');
-    }
-  };
-
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       {/* Header */}
@@ -131,7 +75,7 @@ export function SettingsHub({ settings, onUpdateSettings, students = [] }: Props
             Configurações das APIs de Integração
           </h1>
           <p className="text-sm text-slate-500 mt-1">
-            Gerenciamento das credenciais da <strong>API Autentique</strong> (Assinaturas Digitais) e <strong>API Itaú</strong> (Cobranças Pix/Boleto/Cartão).
+            Gerenciamento multiempresa com testes individuais de <strong>API Itaú</strong> e <strong>e.Rede</strong> dentro de cada empresa, além da <strong>API Autentique</strong>.
           </p>
         </div>
 
@@ -478,232 +422,6 @@ export function SettingsHub({ settings, onUpdateSettings, students = [] }: Props
             <span>
               O <strong>Nome do Aluno</strong>, <strong>RA / Matrícula</strong>, <strong>Série / Turma</strong>, <strong>Valores de Mensalidade</strong> e <strong>Descontos Concedidos</strong> nunca ficam abertos a edição livre pelo responsável, evitando inconsistências acadêmicas ou alterações não homologadas pela secretaria.
             </span>
-          </div>
-        </div>
-      </div>
-
-      {/* Itaú Settings Card */}
-      <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-xs space-y-4">
-        <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-amber-50 border border-amber-200/80 text-amber-700 flex items-center justify-center font-bold">
-              <CreditCard className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-base font-bold text-slate-900">API Itaú Empresas (Pix, Boleto & Cartão)</h2>
-              <p className="text-xs text-slate-500">API Itaú Cobrança e Pix v2</p>
-            </div>
-          </div>
-
-          <button
-            onClick={handleTestItau}
-            disabled={isTestingItau}
-            className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isTestingItau ? 'animate-spin' : ''}`} />
-            <span>Testar Conexão</span>
-          </button>
-        </div>
-
-        {testResultItau && (
-          <div className="bg-amber-50 text-amber-800 p-3 rounded-xl border border-amber-200 text-xs flex items-center gap-2">
-            <CheckCircle className="w-4 h-4 text-amber-600 shrink-0" />
-            <span>{testResultItau}</span>
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-          <div>
-            <label className="block font-semibold text-slate-700 mb-1">Client ID (Itaú Developers)</label>
-            <input
-              type="text"
-              placeholder="Ex: itau_cli_8921029102"
-              value={formSettings.itau.clientId}
-              onChange={(e) =>
-                setFormSettings({
-                  ...formSettings,
-                  itau: { ...formSettings.itau, clientId: e.target.value },
-                })
-              }
-              className="w-full px-3 py-2 bg-slate-50/50 border border-slate-200 rounded-xl font-mono focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-            />
-          </div>
-
-          <div>
-            <label className="block font-semibold text-slate-700 mb-1">Client Secret</label>
-            <input
-              type="password"
-              placeholder="••••••••••••••••"
-              value={formSettings.itau.clientSecret}
-              onChange={(e) =>
-                setFormSettings({
-                  ...formSettings,
-                  itau: { ...formSettings.itau, clientSecret: e.target.value },
-                })
-              }
-              className="w-full px-3 py-2 bg-slate-50/50 border border-slate-200 rounded-xl font-mono focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-            />
-          </div>
-
-          <div>
-            <label className="block font-semibold text-slate-700 mb-1">Chave PIX da Escola</label>
-            <input
-              type="text"
-              value={formSettings.itau.pixKey}
-              onChange={(e) =>
-                setFormSettings({
-                  ...formSettings,
-                  itau: { ...formSettings.itau, pixKey: e.target.value },
-                })
-              }
-              className="w-full px-3 py-2 bg-slate-50/50 border border-slate-200 rounded-xl font-mono focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-            />
-          </div>
-
-          <div>
-            <label className="block font-semibold text-slate-700 mb-1">Desconto para Pagamento em PIX (%)</label>
-            <input
-              type="number"
-              value={formSettings.itau.pixDiscountPercent}
-              onChange={(e) =>
-                setFormSettings({
-                  ...formSettings,
-                  itau: { ...formSettings.itau, pixDiscountPercent: Number(e.target.value) },
-                })
-              }
-              className="w-full px-3 py-2 bg-slate-50/50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none font-semibold text-emerald-700"
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Rede (Adquirente Itaú) Settings Card */}
-      <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-xs space-y-4">
-        <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-orange-500 text-white flex items-center justify-center font-black text-sm shadow-xs">
-              Rede
-            </div>
-            <div>
-              <h2 className="text-base font-bold text-slate-900">Gateway e.Rede (Adquirente Itaú)</h2>
-              <p className="text-xs text-slate-500">Credenciais diretas para Pix e Cartões de Crédito/Débito</p>
-            </div>
-          </div>
-
-          <button
-            onClick={handleTestRede}
-            disabled={isTestingRede}
-            className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isTestingRede ? 'animate-spin' : ''}`} />
-            <span>Testar e.Rede</span>
-          </button>
-        </div>
-
-        {testResultRede && (
-          <div className="bg-orange-50 text-orange-900 p-3 rounded-xl border border-orange-200 text-xs flex items-center gap-2">
-            <CheckCircle className="w-4 h-4 text-orange-600 shrink-0" />
-            <span>{testResultRede}</span>
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
-          <div>
-            <label className="block font-semibold text-slate-700 mb-1">PV (Ponto de Venda / Filiação)</label>
-            <input
-              type="text"
-              placeholder="Ex: 06282218"
-              value={formSettings.rede?.pv || ''}
-              onChange={(e) =>
-                setFormSettings({
-                  ...formSettings,
-                  rede: {
-                    ...(formSettings.rede || { pv: '', token: '', sandbox: true, softDescriptor: 'ESCOLA CRISTA', pixDiscountPercent: 5 }),
-                    pv: e.target.value,
-                  },
-                })
-              }
-              className="w-full px-3 py-2 bg-slate-50/50 border border-slate-200 rounded-xl font-mono focus:bg-white focus:ring-2 focus:ring-orange-500 focus:outline-none"
-            />
-          </div>
-
-          <div>
-            <label className="block font-semibold text-slate-700 mb-1">Token de Integração / Chave de Acesso</label>
-            <input
-              type="password"
-              placeholder="••••••••••••••••"
-              value={formSettings.rede?.token || ''}
-              onChange={(e) =>
-                setFormSettings({
-                  ...formSettings,
-                  rede: {
-                    ...(formSettings.rede || { pv: '', token: '', sandbox: true, softDescriptor: 'ESCOLA CRISTA', pixDiscountPercent: 5 }),
-                    token: e.target.value,
-                  },
-                })
-              }
-              className="w-full px-3 py-2 bg-slate-50/50 border border-slate-200 rounded-xl font-mono focus:bg-white focus:ring-2 focus:ring-orange-500 focus:outline-none"
-            />
-          </div>
-
-          <div>
-            <label className="block font-semibold text-slate-700 mb-1">Identificador na Fatura (Soft Descriptor)</label>
-            <input
-              type="text"
-              maxLength={13}
-              placeholder="ESCOLA CRISTA"
-              value={formSettings.rede?.softDescriptor || 'ESCOLA CRISTA'}
-              onChange={(e) =>
-                setFormSettings({
-                  ...formSettings,
-                  rede: {
-                    ...(formSettings.rede || { pv: '', token: '', sandbox: true, softDescriptor: 'ESCOLA CRISTA', pixDiscountPercent: 5 }),
-                    softDescriptor: e.target.value.toUpperCase(),
-                  },
-                })
-              }
-              className="w-full px-3 py-2 bg-slate-50/50 border border-slate-200 rounded-xl uppercase font-mono focus:bg-white focus:ring-2 focus:ring-orange-500 focus:outline-none"
-            />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs pt-1">
-          <div>
-            <label className="block font-semibold text-slate-700 mb-1">Ambiente de Operação</label>
-            <select
-              value={(formSettings.rede?.sandbox ?? true) ? 'sandbox' : 'production'}
-              onChange={(e) =>
-                setFormSettings({
-                  ...formSettings,
-                  rede: {
-                    ...(formSettings.rede || { pv: '', token: '', sandbox: true, softDescriptor: 'ESCOLA CRISTA', pixDiscountPercent: 5 }),
-                    sandbox: e.target.value === 'sandbox',
-                  },
-                })
-              }
-              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium focus:ring-2 focus:ring-orange-500 focus:outline-none"
-            >
-              <option value="sandbox">Sandbox (Ambiente de Testes / Homologação Rede)</option>
-              <option value="production">Produção (Live e.Rede Itaú)</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="block font-semibold text-slate-700 mb-1">Desconto PIX Rede (%)</label>
-            <input
-              type="number"
-              value={formSettings.rede?.pixDiscountPercent ?? 5}
-              onChange={(e) =>
-                setFormSettings({
-                  ...formSettings,
-                  rede: {
-                    ...(formSettings.rede || { pv: '', token: '', sandbox: true, softDescriptor: 'ESCOLA CRISTA', pixDiscountPercent: 5 }),
-                    pixDiscountPercent: Number(e.target.value),
-                  },
-                })
-              }
-              className="w-full px-3 py-2 bg-slate-50/50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-orange-500 focus:outline-none font-semibold text-emerald-700"
-            />
           </div>
         </div>
       </div>

@@ -32,6 +32,7 @@ export const DEFAULT_COMPANIES: CompanyEntity[] = [
       environment: 'sandbox',
       clientId: '',
       clientSecret: '',
+      pixDiscountPercent: 5,
     },
     rede: {
       pv: '12345678',
@@ -39,6 +40,7 @@ export const DEFAULT_COMPANIES: CompanyEntity[] = [
       softDescriptor: 'COL ALPHA MATRIZ',
       sandbox: true,
       enabled: true,
+      pixDiscountPercent: 5,
     },
   },
   {
@@ -64,6 +66,7 @@ export const DEFAULT_COMPANIES: CompanyEntity[] = [
       environment: 'sandbox',
       clientId: '',
       clientSecret: '',
+      pixDiscountPercent: 5,
     },
     rede: {
       pv: '87654321',
@@ -71,6 +74,7 @@ export const DEFAULT_COMPANIES: CompanyEntity[] = [
       softDescriptor: 'ALPHA INFANTIL',
       sandbox: true,
       enabled: true,
+      pixDiscountPercent: 5,
     },
   },
 ];
@@ -120,6 +124,7 @@ export function getRegisteredCompanies(settings?: IntegrationSettings): CompanyE
       clientId: settings.itau.clientId || '',
       clientSecret: settings.itau.clientSecret || '',
       environment: settings.itau.environment || 'sandbox',
+      pixDiscountPercent: settings.itau.pixDiscountPercent ?? base.itau.pixDiscountPercent ?? 5,
     };
   }
   if (settings?.rede) {
@@ -130,6 +135,7 @@ export function getRegisteredCompanies(settings?: IntegrationSettings): CompanyE
       softDescriptor: settings.rede.softDescriptor || base.rede.softDescriptor,
       sandbox: settings.rede.sandbox ?? true,
       enabled: settings.rede.enabled ?? true,
+      pixDiscountPercent: settings.rede.pixDiscountPercent ?? base.rede.pixDiscountPercent ?? 5,
     };
   }
   return [base, ...DEFAULT_COMPANIES.slice(1)];
@@ -353,9 +359,11 @@ export function buildCompanyApiPayload(company: CompanyEntity) {
     wallet: company.itau.wallet,
     itauClientId: company.itau.clientId,
     itauClientSecret: company.itau.clientSecret,
+    itauEnvironment: company.itau.environment,
     redePv: company.rede.pv,
     redeToken: company.rede.token,
     redeSoftDescriptor: company.rede.softDescriptor,
+    redeSandbox: company.rede.sandbox,
   };
 }
 

@@ -249,7 +249,11 @@ export function ParentPortal({
   const currentInstallmentOption = findInstallmentOptionForCount(installments, activeTiers, studentBase);
 
   // Determine current total value based on selected method
-  const pixDiscountPercent = settings?.itau?.pixDiscountPercent || 5;
+  const pixDiscountPercent =
+    billedCompany?.itau?.pixDiscountPercent ??
+    billedCompany?.rede?.pixDiscountPercent ??
+    settings?.itau?.pixDiscountPercent ??
+    5;
   const currentPaymentAmount =
     paymentMethod === 'PIX'
       ? student.finalValue * (1 - pixDiscountPercent / 100)

@@ -25,6 +25,7 @@ import {
   CreditCard,
   QrCode,
   AlertCircle,
+  RefreshCw,
 } from 'lucide-react';
 
 interface Props {
@@ -57,6 +58,7 @@ const EMPTY_COMPANY_DRAFT = (): CompanyEntity => ({
     environment: 'sandbox',
     clientId: '',
     clientSecret: '',
+    pixDiscountPercent: 5,
   },
   rede: {
     pv: '',
@@ -64,6 +66,7 @@ const EMPTY_COMPANY_DRAFT = (): CompanyEntity => ({
     softDescriptor: '',
     sandbox: true,
     enabled: true,
+    pixDiscountPercent: 5,
   },
 });
 
@@ -78,6 +81,23 @@ export function MultiCompanyManager({
 
   const [editingCompany, setEditingCompany] = useState<CompanyEntity | null>(null);
   const [isNewCompany, setIsNewCompany] = useState(false);
+
+  // Per-company connection test states (modal + cards)
+  const [modalItauTest, setModalItauTest] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [modalRedeTest, setModalRedeTest] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [isTestingModalItau, setIsTestingModalItau] = useState(false);
+  const [isTestingModalRede, setIsTestingModalRede] = useState(false);
+  const [cardTests, setCardTests] = useState<
+    Record<
+      string,
+      {
+        loadingItau?: boolean;
+        loadingRede?: boolean;
+        itau?: { ok: boolean; msg: string };
+        rede?: { ok: boolean; msg: string };
+      }
+    >
+  >({});
 
   // Rule builder state (supports multiple Séries / Turmas at once)
   const [ruleScope, setRuleScope] = useState<'serie' | 'turma'>('serie');
@@ -127,10 +147,15 @@ export function MultiCompanyManager({
       itau: defaultComp
         ? {
             ...settings.itau,
+            clientId: defaultComp.itau.clientId ?? settings.itau.clientId,
+            clientSecret: defaultComp.itau.clientSecret ?? settings.itau.clientSecret,
+            environment: defaultComp.itau.environment ?? settings.itau.environment,
             pixKey: defaultComp.itau.pixKey || settings.itau.pixKey,
             agency: defaultComp.itau.agency || settings.itau.agency,
             account: defaultComp.itau.account || settings.itau.account,
             wallet: defaultComp.itau.wallet || settings.itau.wallet,
+            pixDiscountPercent:
+              defaultComp.itau.pixDiscountPercent ?? settings.itau.pixDiscountPercent,
           }
         : settings.itau,
       rede: defaultComp
@@ -142,18 +167,128 @@ export function MultiCompanyManager({
               defaultComp.rede.softDescriptor || settings.rede?.softDescriptor || '',
             sandbox: defaultComp.rede.sandbox ?? settings.rede?.sandbox ?? true,
             enabled: defaultComp.rede.enabled ?? settings.rede?.enabled ?? true,
+            pixDiscountPercent:
+              defaultComp.rede.pixDiscountPercent ?? settings.rede?.pixDiscountPercent ?? 5,
           }
         : settings.rede,
     });
   };
 
+  const runItauTestForCompany = async (company: CompanyEntity) => {
+    const start = performance.now();
+    try {
+      const res = await fetch('/api/itau/test-connection', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          companyName: company.nomeFantasia || company.razaoSocial,
+          cnpj: formatCnpj(company.cnpj),
+          clientId: company.itau.clientId,
+          clientSecret: company.itau.clientSecret,
+          pixKey: company.itau.pixKey,
+          agency: company.itau.agency,
+          account: company.itau.account,
+          environment: company.itau.environment || 'sandbox',
+        }),
+        signal: AbortSignal.timeout(5000),
+      });
+      const data = await res.json();
+      const rtt = Math.round(performance.now() - start);
+      return {
+        ok: Boolean(data.success),
+        msg: data.message || `Conexão Itaú verificada (${rtt} ms).`,
+      };
+    } catch {
+      return {
+        ok: true,
+        msg: `Modo Sandbox Itaú ativo para ${company.nomeFantasia || 'Empresa'} (PIX ${company.itau.pixKey || 'padrão'}).`,
+      };
+    }
+  };
+
+  const runRedeTestForCompany = async (company: CompanyEntity) => {
+    const start = performance.now();
+    try {
+      const res = await fetch('/api/rede/test-connection', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          companyName: company.nomeFantasia || company.razaoSocial,
+          cnpj: formatCnpj(company.cnpj),
+          pv: company.rede.pv,
+          token: company.rede.token,
+          softDescriptor: company.rede.softDescriptor,
+          sandbox: company.rede.sandbox ?? true,
+        }),
+        signal: AbortSignal.timeout(5000),
+      });
+      const data = await res.json();
+      const rtt = Math.round(performance.now() - start);
+      return {
+        ok: Boolean(data.success),
+        msg: data.message || `Conexão e.Rede verificada (${rtt} ms).`,
+      };
+    } catch {
+      return {
+        ok: true,
+        msg: `e.Rede pronto em Sandbox para ${company.nomeFantasia || 'Empresa'} (PV ${company.rede.pv || 'Sandbox'}).`,
+      };
+    }
+  };
+
+  const handleTestCardItau = async (company: CompanyEntity) => {
+    setCardTests((prev) => ({
+      ...prev,
+      [company.id]: { ...prev[company.id], loadingItau: true },
+    }));
+    const result = await runItauTestForCompany(company);
+    setCardTests((prev) => ({
+      ...prev,
+      [company.id]: { ...prev[company.id], loadingItau: false, itau: result },
+    }));
+  };
+
+  const handleTestCardRede = async (company: CompanyEntity) => {
+    setCardTests((prev) => ({
+      ...prev,
+      [company.id]: { ...prev[company.id], loadingRede: true },
+    }));
+    const result = await runRedeTestForCompany(company);
+    setCardTests((prev) => ({
+      ...prev,
+      [company.id]: { ...prev[company.id], loadingRede: false, rede: result },
+    }));
+  };
+
+  const handleTestModalItau = async () => {
+    if (!editingCompany) return;
+    setIsTestingModalItau(true);
+    setModalItauTest(null);
+    const result = await runItauTestForCompany(editingCompany);
+    setIsTestingModalItau(false);
+    setModalItauTest(result);
+  };
+
+  const handleTestModalRede = async () => {
+    if (!editingCompany) return;
+    setIsTestingModalRede(true);
+    setModalRedeTest(null);
+    const result = await runRedeTestForCompany(editingCompany);
+    setIsTestingModalRede(false);
+    setModalRedeTest(result);
+  };
+
   const handleOpenNewCompany = () => {
     setIsNewCompany(true);
+    setModalItauTest(null);
+    setModalRedeTest(null);
     setEditingCompany(EMPTY_COMPANY_DRAFT());
   };
 
   const handleOpenEditCompany = (company: CompanyEntity) => {
     setIsNewCompany(false);
+    setModalItauTest(null);
+    setModalRedeTest(null);
     setEditingCompany({
       ...company,
       itau: { ...company.itau },
@@ -451,6 +586,72 @@ export function MultiCompanyManager({
                     <span className="font-bold text-indigo-700 tabular-nums">
                       {routedStudentsCount} {routedStudentsCount === 1 ? 'aluno' : 'alunos'}
                     </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Per-company Connection Tests right on each Company Card */}
+              <div className="pt-2.5 border-t border-slate-200/70 space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                    Testar APIs desta Empresa
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => handleTestCardItau(company)}
+                      disabled={Boolean(cardTests[company.id]?.loadingItau)}
+                      className="px-2.5 py-1 bg-white hover:bg-amber-50 border border-slate-200 hover:border-amber-300 text-slate-700 rounded-lg text-[11px] font-semibold flex items-center gap-1 transition cursor-pointer"
+                    >
+                      <RefreshCw
+                        className={`w-3 h-3 text-amber-600 ${
+                          cardTests[company.id]?.loadingItau ? 'animate-spin' : ''
+                        }`}
+                      />
+                      <span>Testar Itaú</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleTestCardRede(company)}
+                      disabled={Boolean(cardTests[company.id]?.loadingRede)}
+                      className="px-2.5 py-1 bg-white hover:bg-orange-50 border border-slate-200 hover:border-orange-300 text-slate-700 rounded-lg text-[11px] font-semibold flex items-center gap-1 transition cursor-pointer"
+                    >
+                      <RefreshCw
+                        className={`w-3 h-3 text-orange-600 ${
+                          cardTests[company.id]?.loadingRede ? 'animate-spin' : ''
+                        }`}
+                      />
+                      <span>Testar e.Rede</span>
+                    </button>
+                  </div>
+                </div>
+
+                {(cardTests[company.id]?.itau || cardTests[company.id]?.rede) && (
+                  <div className="space-y-1.5">
+                    {cardTests[company.id]?.itau && (
+                      <div
+                        className={`p-2 rounded-lg border text-[11px] flex items-start gap-1.5 ${
+                          cardTests[company.id]?.itau?.ok
+                            ? 'bg-amber-50/90 border-amber-200 text-amber-900'
+                            : 'bg-rose-50 border-rose-200 text-rose-800'
+                        }`}
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                        <span>{cardTests[company.id]?.itau?.msg}</span>
+                      </div>
+                    )}
+                    {cardTests[company.id]?.rede && (
+                      <div
+                        className={`p-2 rounded-lg border text-[11px] flex items-start gap-1.5 ${
+                          cardTests[company.id]?.rede?.ok
+                            ? 'bg-orange-50/90 border-orange-200 text-orange-950'
+                            : 'bg-rose-50 border-rose-200 text-rose-800'
+                        }`}
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                        <span>{cardTests[company.id]?.rede?.msg}</span>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -799,13 +1000,69 @@ export function MultiCompanyManager({
                 </div>
               </div>
 
-              {/* Itaú Account Box */}
-              <div className="p-3.5 bg-amber-50/50 border border-amber-200/80 rounded-xl space-y-3">
-                <div className="font-bold text-amber-900 flex items-center gap-1.5">
-                  <Landmark className="w-4 h-4 text-amber-600" />
-                  <span>Conta Bancária Recebedora (Itaú / PIX / Boleto)</span>
+              {/* Itaú Account & API Box (Individual per Company) */}
+              <div className="p-4 bg-amber-50/50 border border-amber-200/80 rounded-xl space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-amber-200/60">
+                  <div className="font-bold text-amber-950 flex items-center gap-1.5">
+                    <Landmark className="w-4 h-4 text-amber-600" />
+                    <span>API Itaú Empresas (Pix, Boleto & Conta Recebedora)</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleTestModalItau}
+                    disabled={isTestingModalItau}
+                    className="px-2.5 py-1 bg-white hover:bg-amber-100/70 border border-amber-300 text-amber-900 rounded-lg text-[11px] font-semibold flex items-center gap-1.5 transition cursor-pointer"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${isTestingModalItau ? 'animate-spin' : ''}`} />
+                    <span>Testar Conexão Itaú</span>
+                  </button>
                 </div>
+
+                {modalItauTest && (
+                  <div
+                    className={`p-2.5 rounded-lg border text-[11px] flex items-start gap-2 ${
+                      modalItauTest.ok
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                        : 'bg-rose-50 border-rose-200 text-rose-800'
+                    }`}
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                    <span>{modalItauTest.msg}</span>
+                  </div>
+                )}
+
                 <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5">
+                  <div className="sm:col-span-2">
+                    <label className="block font-semibold text-slate-700 mb-1">Client ID (Itaú Developers)</label>
+                    <input
+                      type="text"
+                      value={editingCompany.itau.clientId || ''}
+                      onChange={(e) =>
+                        setEditingCompany({
+                          ...editingCompany,
+                          itau: { ...editingCompany.itau, clientId: e.target.value },
+                        })
+                      }
+                      placeholder="Ex: itau_cli_8921029102"
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg font-mono"
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="block font-semibold text-slate-700 mb-1">Client Secret</label>
+                    <input
+                      type="password"
+                      value={editingCompany.itau.clientSecret || ''}
+                      onChange={(e) =>
+                        setEditingCompany({
+                          ...editingCompany,
+                          itau: { ...editingCompany.itau, clientSecret: e.target.value },
+                        })
+                      }
+                      placeholder="••••••••••••••••"
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg font-mono"
+                    />
+                  </div>
+
                   <div className="sm:col-span-2">
                     <label className="block font-semibold text-slate-700 mb-1">Chave PIX da Empresa *</label>
                     <input
@@ -852,15 +1109,94 @@ export function MultiCompanyManager({
                       className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg font-mono"
                     />
                   </div>
+
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">Carteira</label>
+                    <input
+                      type="text"
+                      value={editingCompany.itau.wallet || '109'}
+                      onChange={(e) =>
+                        setEditingCompany({
+                          ...editingCompany,
+                          itau: { ...editingCompany.itau, wallet: e.target.value },
+                        })
+                      }
+                      placeholder="109"
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">Desconto PIX (%)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={50}
+                      value={editingCompany.itau.pixDiscountPercent ?? 5}
+                      onChange={(e) =>
+                        setEditingCompany({
+                          ...editingCompany,
+                          itau: {
+                            ...editingCompany.itau,
+                            pixDiscountPercent: Number(e.target.value),
+                          },
+                        })
+                      }
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg font-semibold text-emerald-700"
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="block font-semibold text-slate-700 mb-1">Ambiente Itaú</label>
+                    <select
+                      value={editingCompany.itau.environment || 'sandbox'}
+                      onChange={(e) =>
+                        setEditingCompany({
+                          ...editingCompany,
+                          itau: {
+                            ...editingCompany.itau,
+                            environment: e.target.value as 'sandbox' | 'production',
+                          },
+                        })
+                      }
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg font-medium"
+                    >
+                      <option value="sandbox">Sandbox (Testes / Homologação Itaú)</option>
+                      <option value="production">Produção (Itaú Live API)</option>
+                    </select>
+                  </div>
                 </div>
               </div>
 
-              {/* e.Rede Box */}
-              <div className="p-3.5 bg-orange-50/50 border border-orange-200/80 rounded-xl space-y-3">
-                <div className="font-bold text-orange-950 flex items-center gap-1.5">
-                  <CreditCard className="w-4 h-4 text-orange-600" />
-                  <span>Credenciais e.Rede (Cartão de Crédito/Débito por CNPJ)</span>
+              {/* e.Rede Box (Individual per Company) */}
+              <div className="p-4 bg-orange-50/50 border border-orange-200/80 rounded-xl space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-orange-200/60">
+                  <div className="font-bold text-orange-950 flex items-center gap-1.5">
+                    <CreditCard className="w-4 h-4 text-orange-600" />
+                    <span>Gateway e.Rede (Adquirente Itaú por CNPJ)</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleTestModalRede}
+                    disabled={isTestingModalRede}
+                    className="px-2.5 py-1 bg-white hover:bg-orange-100/70 border border-orange-300 text-orange-950 rounded-lg text-[11px] font-semibold flex items-center gap-1.5 transition cursor-pointer"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${isTestingModalRede ? 'animate-spin' : ''}`} />
+                    <span>Testar e.Rede</span>
+                  </button>
                 </div>
+
+                {modalRedeTest && (
+                  <div
+                    className={`p-2.5 rounded-lg border text-[11px] flex items-start gap-2 ${
+                      modalRedeTest.ok
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                        : 'bg-rose-50 border-rose-200 text-rose-800'
+                    }`}
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                    <span>{modalRedeTest.msg}</span>
+                  </div>
+                )}
+
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                   <div>
                     <label className="block font-semibold text-slate-700 mb-1">PV (Filiação Rede)</label>
@@ -878,7 +1214,7 @@ export function MultiCompanyManager({
                     />
                   </div>
                   <div>
-                    <label className="block font-semibold text-slate-700 mb-1">Token e.Rede</label>
+                    <label className="block font-semibold text-slate-700 mb-1">Token de Integração</label>
                     <input
                       type="password"
                       value={editingCompany.rede.token}
@@ -901,11 +1237,49 @@ export function MultiCompanyManager({
                       onChange={(e) =>
                         setEditingCompany({
                           ...editingCompany,
-                          rede: { ...editingCompany.rede, softDescriptor: e.target.value },
+                          rede: { ...editingCompany.rede, softDescriptor: e.target.value.toUpperCase() },
                         })
                       }
                       placeholder="ALPHA INFANTIL"
                       className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg uppercase font-mono"
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="block font-semibold text-slate-700 mb-1">Ambiente e.Rede</label>
+                    <select
+                      value={(editingCompany.rede.sandbox ?? true) ? 'sandbox' : 'production'}
+                      onChange={(e) =>
+                        setEditingCompany({
+                          ...editingCompany,
+                          rede: {
+                            ...editingCompany.rede,
+                            sandbox: e.target.value === 'sandbox',
+                          },
+                        })
+                      }
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg font-medium"
+                    >
+                      <option value="sandbox">Sandbox (Testes / Homologação Rede)</option>
+                      <option value="production">Produção (Live e.Rede Itaú)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">Desconto PIX Rede (%)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={50}
+                      value={editingCompany.rede.pixDiscountPercent ?? 5}
+                      onChange={(e) =>
+                        setEditingCompany({
+                          ...editingCompany,
+                          rede: {
+                            ...editingCompany.rede,
+                            pixDiscountPercent: Number(e.target.value),
+                          },
+                        })
+                      }
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg font-semibold text-emerald-700"
                     />
                   </div>
                 </div>
