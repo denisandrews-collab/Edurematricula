@@ -79,10 +79,11 @@ export function MultiCompanyManager({
   const [editingCompany, setEditingCompany] = useState<CompanyEntity | null>(null);
   const [isNewCompany, setIsNewCompany] = useState(false);
 
-  // Rule builder state
+  // Rule builder state (supports multiple Séries / Turmas at once)
   const [ruleScope, setRuleScope] = useState<'serie' | 'turma'>('serie');
-  const [ruleTargetValue, setRuleTargetValue] = useState('');
-  const [ruleCustomTarget, setRuleCustomTarget] = useState('');
+  const [selectedTargets, setSelectedTargets] = useState<string[]>([]);
+  const [customTargets, setCustomTargets] = useState<string[]>([]);
+  const [ruleCustomInput, setRuleCustomInput] = useState('');
   const [ruleCompanyId, setRuleCompanyId] = useState<string>(companies[0]?.id || '');
   const [feedback, setFeedback] = useState<string | null>(null);
 
@@ -92,16 +93,24 @@ export function MultiCompanyManager({
     base.add('Educação Infantil - Maternal');
     base.add('Educação Infantil - Pré I');
     base.add('Educação Infantil - Pré II');
+    billingRules
+      .filter((r) => r.scope === 'serie')
+      .forEach((r) => base.add(r.targetValue));
+    customTargets.forEach((t) => base.add(t));
     return Array.from(base);
-  }, [students]);
+  }, [students, billingRules, customTargets]);
 
   const uniqueTurmas = useMemo(() => {
     const base = new Set<string>(students.map((s) => s.turma).filter(Boolean));
     base.add('Berçário Integral');
     base.add('Berçário Matutino');
     base.add('Infantil II - Integral');
+    billingRules
+      .filter((r) => r.scope === 'turma')
+      .forEach((r) => base.add(r.targetValue));
+    customTargets.forEach((t) => base.add(t));
     return Array.from(base);
-  }, [students]);
+  }, [students, billingRules, customTargets]);
 
   const showNotice = (msg: string) => {
     setFeedback(msg);
@@ -215,38 +224,68 @@ export function MultiCompanyManager({
     showNotice(`Empresa "${target.nomeFantasia}" removida e vínculos ajustados.`);
   };
 
+  const toggleTargetSelection = (target: string) => {
+    setSelectedTargets((prev) =>
+      prev.includes(target) ? prev.filter((t) => t !== target) : [...prev, target]
+    );
+  };
+
+  const handleAddCustomTargets = () => {
+    const items = ruleCustomInput
+      .split(/[,\n;]+/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+    if (items.length === 0) return;
+
+    setCustomTargets((prev) => Array.from(new Set([...prev, ...items])));
+    setSelectedTargets((prev) => Array.from(new Set([...prev, ...items])));
+    setRuleCustomInput('');
+  };
+
   const handleAddOrUpdateRule = (e: React.FormEvent) => {
     e.preventDefault();
-    const target = (ruleTargetValue === '__custom__' ? ruleCustomTarget : ruleTargetValue).trim();
-    if (!target || !ruleCompanyId) return;
+    const extraCustom = ruleCustomInput
+      .split(/[,\n;]+/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+    const targetsToBind = Array.from(new Set([...selectedTargets, ...extraCustom]));
+    if (targetsToBind.length === 0 || !ruleCompanyId) return;
 
-    const existingIndex = billingRules.findIndex(
-      (r) => r.scope === ruleScope && r.targetValue.toLowerCase() === target.toLowerCase()
-    );
+    const nowIso = new Date().toISOString();
+    let nextRules = [...billingRules];
 
-    const newRule: BillingCompanyRule = {
-      id: existingIndex >= 0 ? billingRules[existingIndex].id : 'rule_' + Date.now().toString(36),
-      scope: ruleScope,
-      targetValue: target,
-      companyId: ruleCompanyId,
-      updatedAt: new Date().toISOString(),
-    };
-
-    const nextRules =
-      existingIndex >= 0
-        ? billingRules.map((r, i) => (i === existingIndex ? newRule : r))
-        : [...billingRules, newRule];
+    targetsToBind.forEach((target, idx) => {
+      const existingIndex = nextRules.findIndex(
+        (r) => r.scope === ruleScope && r.targetValue.toLowerCase() === target.toLowerCase()
+      );
+      const newRule: BillingCompanyRule = {
+        id:
+          existingIndex >= 0
+            ? nextRules[existingIndex].id
+            : `rule_${Date.now().toString(36)}_${idx}`,
+        scope: ruleScope,
+        targetValue: target,
+        companyId: ruleCompanyId,
+        updatedAt: nowIso,
+      };
+      if (existingIndex >= 0) {
+        nextRules[existingIndex] = newRule;
+      } else {
+        nextRules.push(newRule);
+      }
+    });
 
     onUpdateSettings({
       ...settings,
       billingRules: nextRules,
     });
 
-    setRuleTargetValue('');
-    setRuleCustomTarget('');
+    setSelectedTargets([]);
+    setRuleCustomInput('');
     const comp = companies.find((c) => c.id === ruleCompanyId);
+    const scopeLabel = ruleScope === 'serie' ? 'Série(s)' : 'Turma(s)';
     showNotice(
-      `Vínculo aplicado: ${ruleScope === 'serie' ? 'Série' : 'Turma'} "${target}" → ${comp?.nomeFantasia || 'CNPJ'} (${comp?.cnpj || ''}).`
+      `Vínculo em lote aplicado: ${targetsToBind.length} ${scopeLabel} (${targetsToBind.join(', ')}) → ${comp?.nomeFantasia || 'CNPJ'} (${comp?.cnpj || ''}).`
     );
   };
 
@@ -436,87 +475,149 @@ export function MultiCompanyManager({
 
         <form
           onSubmit={handleAddOrUpdateRule}
-          className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 bg-slate-50 p-3.5 rounded-xl border border-slate-200/80 text-xs items-end"
+          className="bg-slate-50 p-4 rounded-xl border border-slate-200/80 text-xs space-y-3"
         >
-          <div className="sm:col-span-2">
-            <label className="block font-semibold text-slate-700 mb-1">Tipo</label>
-            <select
-              value={ruleScope}
-              onChange={(e) => {
-                setRuleScope(e.target.value as 'serie' | 'turma');
-                setRuleTargetValue('');
-              }}
-              className="w-full px-2.5 py-2 bg-white border border-slate-200 rounded-lg font-medium text-slate-800"
-            >
-              <option value="serie">Por Série</option>
-              <option value="turma">Por Turma</option>
-            </select>
-          </div>
-
-          <div className="sm:col-span-4">
-            <label className="block font-semibold text-slate-700 mb-1">
-              {ruleScope === 'serie' ? 'Série / Segmento' : 'Turma'}
-            </label>
-            {ruleTargetValue === '__custom__' ? (
-              <div className="flex gap-1.5">
-                <input
-                  type="text"
-                  value={ruleCustomTarget}
-                  onChange={(e) => setRuleCustomTarget(e.target.value)}
-                  placeholder={ruleScope === 'serie' ? 'Ex: Berçário' : 'Ex: Berçário A'}
-                  className="w-full px-2.5 py-2 bg-white border border-indigo-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  required
-                />
-                <button
-                  type="button"
-                  onClick={() => setRuleTargetValue('')}
-                  className="px-2 bg-slate-200 hover:bg-slate-300 rounded-lg text-slate-700 font-bold cursor-pointer"
-                >
-                  Lista
-                </button>
-              </div>
-            ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
+            <div className="sm:col-span-3">
+              <label className="block font-semibold text-slate-700 mb-1">Agrupar regra por</label>
               <select
-                value={ruleTargetValue}
-                onChange={(e) => setRuleTargetValue(e.target.value)}
+                value={ruleScope}
+                onChange={(e) => {
+                  setRuleScope(e.target.value as 'serie' | 'turma');
+                  setSelectedTargets([]);
+                }}
+                className="w-full px-2.5 py-2 bg-white border border-slate-200 rounded-lg font-medium text-slate-800"
+              >
+                <option value="serie">Por Séries (Múltiplas)</option>
+                <option value="turma">Por Turmas (Múltiplas)</option>
+              </select>
+            </div>
+
+            <div className="sm:col-span-6">
+              <label className="block font-semibold text-slate-700 mb-1">Empresa / CNPJ Recebedor</label>
+              <select
+                value={ruleCompanyId}
+                onChange={(e) => setRuleCompanyId(e.target.value)}
                 className="w-full px-2.5 py-2 bg-white border border-slate-200 rounded-lg text-slate-800 font-medium"
                 required
               >
-                <option value="">Selecione...</option>
-                {scopeOptions.map((opt) => (
-                  <option key={opt} value={opt}>
-                    {opt}
+                {companies.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.nomeFantasia} ({formatCnpj(c.cnpj)})
                   </option>
                 ))}
-                <option value="__custom__">+ Digitar outra {ruleScope === 'serie' ? 'Série' : 'Turma'}...</option>
               </select>
-            )}
+            </div>
+
+            <div className="sm:col-span-3">
+              <button
+                type="submit"
+                disabled={selectedTargets.length === 0 && !ruleCustomInput.trim()}
+                className="w-full py-2 px-3 bg-slate-900 hover:bg-slate-800 disabled:opacity-45 disabled:cursor-not-allowed text-white rounded-lg font-semibold transition cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>
+                  Vincular CNPJ
+                  {selectedTargets.length > 0 ? ` (${selectedTargets.length})` : ''}
+                </span>
+              </button>
+            </div>
           </div>
 
-          <div className="sm:col-span-4">
-            <label className="block font-semibold text-slate-700 mb-1">Empresa / CNPJ Recebedor</label>
-            <select
-              value={ruleCompanyId}
-              onChange={(e) => setRuleCompanyId(e.target.value)}
-              className="w-full px-2.5 py-2 bg-white border border-slate-200 rounded-lg text-slate-800 font-medium"
-              required
-            >
-              {companies.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.nomeFantasia} ({formatCnpj(c.cnpj)})
-                </option>
-              ))}
-            </select>
-          </div>
+          {/* Multi-select Série / Turma Checklist */}
+          <div className="pt-2 border-t border-slate-200/70 space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="font-semibold text-slate-700">
+                Selecione uma ou várias {ruleScope === 'serie' ? 'Séries' : 'Turmas'} ao mesmo tempo:
+                {selectedTargets.length > 0 && (
+                  <span className="ml-2 text-indigo-700 font-bold tabular-nums">
+                    ({selectedTargets.length}{' '}
+                    {selectedTargets.length === 1 ? 'selecionada' : 'selecionadas'})
+                  </span>
+                )}
+              </span>
 
-          <div className="sm:col-span-2">
-            <button
-              type="submit"
-              className="w-full py-2 px-3 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-semibold transition cursor-pointer flex items-center justify-center gap-1 whitespace-nowrap"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Vincular CNPJ</span>
-            </button>
+              <div className="flex items-center gap-2 text-[11px]">
+                <button
+                  type="button"
+                  onClick={() => setSelectedTargets(scopeOptions)}
+                  className="font-semibold text-indigo-700 hover:text-indigo-900 cursor-pointer"
+                >
+                  Selecionar todas ({scopeOptions.length})
+                </button>
+                <span className="text-slate-300">|</span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedTargets([])}
+                  className="font-semibold text-slate-500 hover:text-slate-800 cursor-pointer"
+                >
+                  Limpar seleção
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-48 overflow-y-auto pr-1">
+              {scopeOptions.map((opt) => {
+                const isChecked = selectedTargets.includes(opt);
+                const existingRule = billingRules.find(
+                  (r) => r.scope === ruleScope && r.targetValue.toLowerCase() === opt.toLowerCase()
+                );
+                const currentComp = existingRule
+                  ? companies.find((c) => c.id === existingRule.companyId)
+                  : undefined;
+
+                return (
+                  <label
+                    key={opt}
+                    className={`flex items-start gap-2 p-2.5 rounded-lg border cursor-pointer transition select-none ${
+                      isChecked
+                        ? 'bg-indigo-50/80 border-indigo-400 text-indigo-950'
+                        : 'bg-white border-slate-200 hover:border-slate-300 text-slate-700'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onChange={() => toggleTargetSelection(opt)}
+                      className="mt-0.5 w-3.5 h-3.5 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer shrink-0"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="font-semibold truncate leading-tight">{opt}</div>
+                      <div className="text-[10px] text-slate-500 truncate mt-0.5">
+                        {currentComp ? `Atual: ${currentComp.nomeFantasia}` : 'Usa Matriz Padrão'}
+                      </div>
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+
+            {/* Quick custom Série/Turma entry */}
+            <div className="flex flex-col sm:flex-row gap-2 pt-1">
+              <input
+                type="text"
+                value={ruleCustomInput}
+                onChange={(e) => setRuleCustomInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleAddCustomTargets();
+                  }
+                }}
+                placeholder={`Ou digite nova(s) ${
+                  ruleScope === 'serie' ? 'série(s)' : 'turma(s)'
+                } separadas por vírgula (ex.: 1º Ano A, 2º Ano A)...`}
+                className="flex-1 px-3 py-1.5 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+              <button
+                type="button"
+                onClick={handleAddCustomTargets}
+                disabled={!ruleCustomInput.trim()}
+                className="px-3 py-1.5 bg-white hover:bg-slate-100 disabled:opacity-45 text-slate-700 border border-slate-200 rounded-lg font-semibold transition cursor-pointer whitespace-nowrap"
+              >
+                + Adicionar à seleção
+              </button>
+            </div>
           </div>
         </form>
 

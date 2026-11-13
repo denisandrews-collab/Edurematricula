@@ -51,9 +51,9 @@ export function ItauPaymentHub({
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [onlySignedQueue, setOnlySignedQueue] = useState<boolean>(false);
 
-  // Quick Bind Série / Turma -> CNPJ Total right inside Billing Hub
+  // Quick Bind multiple Séries / Turmas -> CNPJ Total right inside Billing Hub
   const [bindScope, setBindScope] = useState<'serie' | 'turma'>('serie');
-  const [bindTarget, setBindTarget] = useState<string>('');
+  const [bindTargets, setBindTargets] = useState<string[]>([]);
   const [bindCompanyId, setBindCompanyId] = useState<string>(
     () => getRegisteredCompanies(settings)[0]?.id || ''
   );
@@ -65,14 +65,23 @@ export function ItauPaymentHub({
   const uniqueSeries = useMemo(() => {
     const s = new Set(students.map((st) => st.serie).filter(Boolean));
     s.add('Berçário');
+    s.add('Educação Infantil - Maternal');
+    s.add('Educação Infantil - Pré I');
+    s.add('Educação Infantil - Pré II');
+    billingRules
+      .filter((r) => r.scope === 'serie')
+      .forEach((r) => s.add(r.targetValue));
     return Array.from(s);
-  }, [students]);
+  }, [students, billingRules]);
 
   const uniqueTurmas = useMemo(() => {
     const t = new Set(students.map((st) => st.turma).filter(Boolean));
     t.add('Berçário Integral');
+    billingRules
+      .filter((r) => r.scope === 'turma')
+      .forEach((r) => t.add(r.targetValue));
     return Array.from(t);
-  }, [students]);
+  }, [students, billingRules]);
 
   // Queue filter: either all students (to build the billing mix by Série/Turma) or signed/paid only
   const baseQueueStudents = useMemo(() => {
@@ -126,26 +135,40 @@ export function ItauPaymentHub({
     setTimeout(() => setToastMessage(null), 4000);
   };
 
-  // Bind an entire Série or Turma to a CNPJ right at billing time
+  const toggleBindTarget = (target: string) => {
+    setBindTargets((prev) =>
+      prev.includes(target) ? prev.filter((item) => item !== target) : [...prev, target]
+    );
+  };
+
+  // Bind multiple Séries or Turmas to a CNPJ at the same time right from billing
   const handleBindGroupCnpj = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!onUpdateSettings || !bindTarget || !bindCompanyId) return;
+    if (!onUpdateSettings || bindTargets.length === 0 || !bindCompanyId) return;
 
-    const existingIdx = billingRules.findIndex(
-      (r) => r.scope === bindScope && r.targetValue.toLowerCase() === bindTarget.toLowerCase()
-    );
-    const nextRule: BillingCompanyRule = {
-      id: existingIdx >= 0 ? billingRules[existingIdx].id : 'rule_' + Date.now().toString(36),
-      scope: bindScope,
-      targetValue: bindTarget,
-      companyId: bindCompanyId,
-      updatedAt: new Date().toISOString(),
-    };
+    const nowIso = new Date().toISOString();
+    const nextRules = [...billingRules];
 
-    const nextRules =
-      existingIdx >= 0
-        ? billingRules.map((r, idx) => (idx === existingIdx ? nextRule : r))
-        : [...billingRules, nextRule];
+    bindTargets.forEach((target, idx) => {
+      const existingIdx = nextRules.findIndex(
+        (r) => r.scope === bindScope && r.targetValue.toLowerCase() === target.toLowerCase()
+      );
+      const nextRule: BillingCompanyRule = {
+        id:
+          existingIdx >= 0
+            ? nextRules[existingIdx].id
+            : `rule_${Date.now().toString(36)}_${idx}`,
+        scope: bindScope,
+        targetValue: target,
+        companyId: bindCompanyId,
+        updatedAt: nowIso,
+      };
+      if (existingIdx >= 0) {
+        nextRules[existingIdx] = nextRule;
+      } else {
+        nextRules.push(nextRule);
+      }
+    });
 
     onUpdateSettings({
       ...settings,
@@ -153,9 +176,11 @@ export function ItauPaymentHub({
     });
 
     const chosenComp = companies.find((c) => c.id === bindCompanyId);
+    const labelPlural = bindScope === 'serie' ? 'Série(s)' : 'Turma(s)';
     showToast(
-      `CNPJ total vinculado: ${bindScope === 'serie' ? 'Série' : 'Turma'} "${bindTarget}" agora cobra via ${chosenComp?.nomeFantasia} (${formatCnpj(chosenComp?.cnpj)}).`
+      `CNPJ total vinculado: ${bindTargets.length} ${labelPlural} (${bindTargets.join(', ')}) agora cobram via ${chosenComp?.nomeFantasia} (${formatCnpj(chosenComp?.cnpj)}).`
     );
+    setBindTargets([]);
   };
 
   // Per-student billing mix override directly in table row
@@ -407,79 +432,134 @@ export function ItauPaymentHub({
           })}
         </div>
 
-        {/* Bind CNPJ Total per Série or Turma right from Billing */}
+        {/* Bind CNPJ Total per multiple Séries or Turmas right from Billing */}
         {onUpdateSettings && (
           <form
             onSubmit={handleBindGroupCnpj}
-            className="mt-2 p-3.5 bg-slate-50 rounded-xl border border-slate-200/80 grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-end text-xs"
+            className="mt-2 p-4 bg-slate-50 rounded-xl border border-slate-200/80 space-y-3 text-xs"
           >
-            <div className="sm:col-span-12 flex items-center gap-1.5 text-[11px] font-bold text-slate-700">
-              <GitBranch className="w-3.5 h-3.5 text-indigo-600" />
-              <span>Vincular CNPJ Total por Série ou Turma na Cobrança</span>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-700">
+                <GitBranch className="w-3.5 h-3.5 text-indigo-600" />
+                <span>Vincular CNPJ Total por Série ou Turma na Cobrança (Seleção Múltipla)</span>
+              </div>
+              {bindTargets.length > 0 && (
+                <span className="text-[11px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-md tabular-nums">
+                  {bindTargets.length} {bindTargets.length === 1 ? 'selecionada' : 'selecionadas'}
+                </span>
+              )}
             </div>
 
-            <div className="sm:col-span-2">
-              <label className="block font-semibold text-slate-600 mb-1">Agrupar por</label>
-              <select
-                value={bindScope}
-                onChange={(e) => {
-                  setBindScope(e.target.value as 'serie' | 'turma');
-                  setBindTarget('');
-                }}
-                className="w-full px-2.5 py-2 bg-white border border-slate-200 rounded-lg font-medium text-slate-800"
-              >
-                <option value="serie">Série</option>
-                <option value="turma">Turma</option>
-              </select>
+            <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-end">
+              <div className="sm:col-span-3">
+                <label className="block font-semibold text-slate-600 mb-1">Agrupar por</label>
+                <select
+                  value={bindScope}
+                  onChange={(e) => {
+                    setBindScope(e.target.value as 'serie' | 'turma');
+                    setBindTargets([]);
+                  }}
+                  className="w-full px-2.5 py-2 bg-white border border-slate-200 rounded-lg font-medium text-slate-800"
+                >
+                  <option value="serie">Séries (Várias ao mesmo tempo)</option>
+                  <option value="turma">Turmas (Várias ao mesmo tempo)</option>
+                </select>
+              </div>
+
+              <div className="sm:col-span-6">
+                <label className="block font-semibold text-slate-600 mb-1">
+                  Cobrar pelo CNPJ da Empresa
+                </label>
+                <select
+                  value={bindCompanyId}
+                  onChange={(e) => setBindCompanyId(e.target.value)}
+                  className="w-full px-2.5 py-2 bg-white border border-slate-200 rounded-lg font-medium text-slate-800"
+                  required
+                >
+                  {companies.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.nomeFantasia} ({formatCnpj(c.cnpj)})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="sm:col-span-3">
+                <button
+                  id="btn-bind-group-cnpj"
+                  type="submit"
+                  disabled={bindTargets.length === 0}
+                  className="w-full py-2 px-3 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-45 disabled:cursor-not-allowed text-white rounded-lg font-semibold transition cursor-pointer whitespace-nowrap"
+                >
+                  Vincular CNPJ{bindTargets.length > 0 ? ` (${bindTargets.length})` : ''}
+                </button>
+              </div>
             </div>
 
-            <div className="sm:col-span-4">
-              <label className="block font-semibold text-slate-600 mb-1">
-                Selecionar {bindScope === 'serie' ? 'Série' : 'Turma'}
-              </label>
-              <select
-                value={bindTarget}
-                onChange={(e) => setBindTarget(e.target.value)}
-                className="w-full px-2.5 py-2 bg-white border border-slate-200 rounded-lg font-medium text-slate-800"
-                required
-              >
-                <option value="">
-                  Escolha a {bindScope === 'serie' ? 'série' : 'turma'}...
-                </option>
-                {(bindScope === 'serie' ? uniqueSeries : uniqueTurmas).map((item) => (
-                  <option key={item} value={item}>
-                    {item}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <div className="pt-2 border-t border-slate-200/70 space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-semibold text-slate-600">
+                  Marque as {bindScope === 'serie' ? 'séries' : 'turmas'} que deseja vincular a este CNPJ:
+                </span>
+                <div className="flex items-center gap-2 text-[11px]">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setBindTargets(bindScope === 'serie' ? uniqueSeries : uniqueTurmas)
+                    }
+                    className="font-semibold text-indigo-700 hover:text-indigo-900 cursor-pointer"
+                  >
+                    Selecionar todas ({(bindScope === 'serie' ? uniqueSeries : uniqueTurmas).length})
+                  </button>
+                  <span className="text-slate-300">|</span>
+                  <button
+                    type="button"
+                    onClick={() => setBindTargets([])}
+                    className="font-semibold text-slate-500 hover:text-slate-800 cursor-pointer"
+                  >
+                    Limpar
+                  </button>
+                </div>
+              </div>
 
-            <div className="sm:col-span-4">
-              <label className="block font-semibold text-slate-600 mb-1">
-                Cobrar pelo CNPJ da Empresa
-              </label>
-              <select
-                value={bindCompanyId}
-                onChange={(e) => setBindCompanyId(e.target.value)}
-                className="w-full px-2.5 py-2 bg-white border border-slate-200 rounded-lg font-medium text-slate-800"
-                required
-              >
-                {companies.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.nomeFantasia} ({formatCnpj(c.cnpj)})
-                  </option>
-                ))}
-              </select>
-            </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-44 overflow-y-auto pr-1">
+                {(bindScope === 'serie' ? uniqueSeries : uniqueTurmas).map((item) => {
+                  const isChecked = bindTargets.includes(item);
+                  const existingRule = billingRules.find(
+                    (r) =>
+                      r.scope === bindScope && r.targetValue.toLowerCase() === item.toLowerCase()
+                  );
+                  const currentComp = existingRule
+                    ? companies.find((c) => c.id === existingRule.companyId)
+                    : undefined;
 
-            <div className="sm:col-span-2">
-              <button
-                id="btn-bind-group-cnpj"
-                type="submit"
-                className="w-full py-2 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-semibold transition cursor-pointer whitespace-nowrap"
-              >
-                Vincular CNPJ
-              </button>
+                  return (
+                    <label
+                      key={item}
+                      className={`flex items-start gap-2 p-2.5 rounded-lg border cursor-pointer transition select-none ${
+                        isChecked
+                          ? 'bg-indigo-50/80 border-indigo-400 text-indigo-950'
+                          : 'bg-white border-slate-200 hover:border-slate-300 text-slate-700'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => toggleBindTarget(item)}
+                        className="mt-0.5 w-3.5 h-3.5 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer shrink-0"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="font-semibold truncate leading-tight">{item}</div>
+                        <div className="text-[10px] text-slate-500 truncate mt-0.5">
+                          {currentComp
+                            ? `Atual: ${currentComp.nomeFantasia}`
+                            : 'Matriz Padrão'}
+                        </div>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
             </div>
           </form>
         )}
