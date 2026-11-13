@@ -20,7 +20,8 @@ import {
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { z } from 'zod';
-import { Student } from '../types';
+import { Student, CompanyEntity } from '../types';
+import { DEFAULT_COMPANIES, buildCompanyApiPayload, formatCnpj } from '../utils/companyResolver';
 
 const cardSchema = z.object({
   number: z
@@ -45,6 +46,7 @@ interface RedePaymentFormProps {
   amount: number;
   uid: string;
   student?: Student;
+  company?: CompanyEntity;
   installmentsCount?: number;
   installmentAmount?: number;
   onSuccess: (tid: string, paymentMethodUsed: string) => void;
@@ -57,11 +59,13 @@ export function RedePaymentForm({
   amount,
   uid,
   student,
+  company,
   installmentsCount = 1,
   installmentAmount,
   onSuccess,
   onCancel,
 }: RedePaymentFormProps) {
+  const effectiveCompany = company || DEFAULT_COMPANIES[0];
   const [status, setStatus] = useState<'idle' | 'processing' | 'success' | 'error' | 'awaiting_pix'>('idle');
   const [paymentError, setPaymentError] = useState<string | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('pix');
@@ -158,6 +162,7 @@ export function RedePaymentForm({
     const tid = `txn_rede_${Date.now()}`;
 
     try {
+      const companyPayload = buildCompanyApiPayload(effectiveCompany);
       const response = await fetch('/api/rede/process-payment', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -174,12 +179,15 @@ export function RedePaymentForm({
           userId: uid,
           paymentMethod,
           installments: paymentMethod === 'credit' ? installmentsCount : 1,
+          customPv: companyPayload.redePv,
+          customToken: companyPayload.redeToken,
+          company: companyPayload,
           customer: {
-            name: student?.responsibleName || 'Luis Carlos Tosto',
-            cpf: (student?.responsibleCpf || '04082089888').replace(/\D/g, ''),
-            email: student?.responsibleEmail || 'admin@modeloalpha.com.br',
-            businessName: 'Escola Cristã Modelo Alpha Ltda',
-            cnpj: '04214446000170',
+            name: student?.responsibleName || 'Responsável Financeiro',
+            cpf: (student?.responsibleCpf || '00000000000').replace(/\D/g, ''),
+            email: student?.responsibleEmail || 'financeiro@colegio.com.br',
+            businessName: effectiveCompany.razaoSocial,
+            cnpj: effectiveCompany.cnpj.replace(/\D/g, ''),
           },
         }),
       });
@@ -425,13 +433,16 @@ export function RedePaymentForm({
             <ChevronLeft className="h-5 w-5" />
           </button>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="text-[10px] font-black uppercase tracking-[0.25em] text-orange-400">Checkout Rede Itaú</span>
               <span className="text-[9px] bg-orange-500/20 text-orange-300 font-bold px-1.5 py-0.5 rounded border border-orange-500/30">
-                Modelo Alpha
+                {effectiveCompany.nomeFantasia}
               </span>
             </div>
             <h2 className="text-xl font-black text-white uppercase tracking-tight">Forma de Pagamento</h2>
+            <p className="text-[11px] font-mono text-slate-400 mt-0.5 tabular-nums">
+              CNPJ: {formatCnpj(effectiveCompany.cnpj)} · Ag. {effectiveCompany.itau.agency || '0910'} · Cc {effectiveCompany.itau.account || '12345-6'}
+            </p>
           </div>
         </div>
         <div className="bg-slate-800 p-2 rounded-xl border border-slate-700">
@@ -542,10 +553,10 @@ export function RedePaymentForm({
                   </div>
                   <div>
                     <h4 className="text-xs font-black text-emerald-400 uppercase tracking-wide">
-                      Liquidação Instantânea
+                      Liquidação Instantânea · {effectiveCompany.nomeFantasia}
                     </h4>
                     <p className="text-xs text-slate-300 leading-snug mt-0.5">
-                      Gere o QR Code dinâmico com chave da Escola Cristã Modelo Alpha Ltda e confirme na hora.
+                      Gere o QR Code dinâmico direto para o CNPJ {formatCnpj(effectiveCompany.cnpj)} (Chave PIX: {effectiveCompany.itau.pixKey || 'padrão'}).
                     </p>
                   </div>
                 </div>

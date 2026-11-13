@@ -1,6 +1,7 @@
 import { Student, ContractTemplate, IntegrationSettings, PortalEditablePermissions } from '../types';
 import { DEFAULT_INSTALLMENT_TIERS, DEFAULT_PROPOSAL_CAMPAIGN } from '../utils/installmentHelper';
 import { DEFAULT_REMINDER_TEMPLATE } from '../utils/reminderHelper';
+import { DEFAULT_COMPANIES, DEFAULT_BILLING_RULES } from '../utils/companyResolver';
 
 export const DEFAULT_PORTAL_PERMISSIONS: PortalEditablePermissions = {
   allowAddress: true,
@@ -504,6 +505,8 @@ export const INITIAL_INTEGRATION_SETTINGS: IntegrationSettings = {
     sandbox: true,
     enabled: true,
   },
+  companies: DEFAULT_COMPANIES,
+  billingRules: DEFAULT_BILLING_RULES,
   portalPermissions: DEFAULT_PORTAL_PERMISSIONS,
   reminderTemplate: DEFAULT_REMINDER_TEMPLATE,
 };

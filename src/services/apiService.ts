@@ -1,5 +1,9 @@
-import { Student, ContractTemplate, IntegrationSettings } from '../types';
+import { Student, ContractTemplate, IntegrationSettings, CompanyEntity } from '../types';
 import { replaceContractPlaceholders } from '../utils/contractFormatter';
+import {
+  buildCompanyApiPayload,
+  resolveContractTemplateForStudent,
+} from '../utils/companyResolver';
 
 export interface AutentiqueCreateDocResult {
   success: boolean;
@@ -23,6 +27,9 @@ export interface ItauPixResult {
   pixQrCode: string;
   expiresAt: string;
   bank: string;
+  beneficiaryCompany?: string;
+  beneficiaryCnpj?: string;
+  bankAccount?: string;
   error?: string;
 }
 
@@ -38,6 +45,9 @@ export interface ItauBoletoResult {
   dueDate: string;
   beneficiary: string;
   bank: string;
+  beneficiaryCompany?: string;
+  beneficiaryCnpj?: string;
+  bankAccount?: string;
   error?: string;
 }
 
@@ -53,6 +63,9 @@ export interface ItauCardResult {
   authorizationCode: string;
   acquirer: string;
   message: string;
+  beneficiaryCompany?: string;
+  beneficiaryCnpj?: string;
+  bankAccount?: string;
   error?: string;
 }
 
@@ -94,7 +107,8 @@ export const apiService = {
     template: ContractTemplate,
     settings?: IntegrationSettings
   ): Promise<AutentiqueCreateDocResult> {
-    const personalizedContract = replaceContractPlaceholders(template.content, student, template);
+    const resolvedTpl = resolveContractTemplateForStudent(template, student, settings);
+    const personalizedContract = replaceContractPlaceholders(resolvedTpl.content, student, resolvedTpl);
 
     try {
       const response = await fetchWithTimeout(
@@ -141,15 +155,18 @@ export const apiService = {
     template: ContractTemplate,
     settings?: IntegrationSettings
   ): Promise<Record<string, AutentiqueCreateDocResult>> {
-    const payloadItems = students.map((student) => ({
-      studentId: student.id,
-      studentName: student.name,
-      responsibleName: student.responsibleName,
-      responsibleEmail: student.responsibleEmail,
-      responsibleCpf: student.responsibleCpf,
-      contractTitle: `Contrato de Prestação de Serviços ${template.academicYear} - ${student.name}`,
-      contractBody: replaceContractPlaceholders(template.content, student, template),
-    }));
+    const payloadItems = students.map((student) => {
+      const resolvedTpl = resolveContractTemplateForStudent(template, student, settings);
+      return {
+        studentId: student.id,
+        studentName: student.name,
+        responsibleName: student.responsibleName,
+        responsibleEmail: student.responsibleEmail,
+        responsibleCpf: student.responsibleCpf,
+        contractTitle: `Contrato de Prestação de Serviços ${resolvedTpl.academicYear} - ${student.name}`,
+        contractBody: replaceContractPlaceholders(resolvedTpl.content, student, resolvedTpl),
+      };
+    });
 
     try {
       const res = await fetchWithTimeout(
@@ -230,8 +247,13 @@ export const apiService = {
     }
   },
 
-  // Itaú: Generate PIX
-  async createItauPix(student: Student, amount: number): Promise<ItauPixResult> {
+  // Itaú: Generate PIX (roteado por Empresa / CNPJ)
+  async createItauPix(
+    student: Student,
+    amount: number,
+    company?: CompanyEntity
+  ): Promise<ItauPixResult> {
+    const companyPayload = company ? buildCompanyApiPayload(company) : undefined;
     try {
       const res = await fetchWithTimeout('/api/itau/pix/create', {
         method: 'POST',
@@ -242,12 +264,21 @@ export const apiService = {
           amount,
           responsibleName: student.responsibleName,
           responsibleCpf: student.responsibleCpf,
+          company: companyPayload,
         }),
       });
       return await res.json();
     } catch {
       const amtStr = Number(amount || 0).toFixed(2);
-      const pixCopyPaste = `00020126580014br.gov.bcb.pix0136colegio@educacao.com.br520400005303986540${amtStr.length}${amtStr}5802BR5925COLEGIO MODELO ALPHA SAO6009SAO PAULO62070503***6304E19F`;
+      const pixKey = companyPayload?.pixKey || 'colegio@educacao.com.br';
+      const merchant = (companyPayload?.nomeFantasia || 'COLEGIO MODELO ALPHA')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toUpperCase()
+        .replace(/[^A-Z0-9 ]/g, '')
+        .slice(0, 25)
+        .padEnd(10, ' ');
+      const pixCopyPaste = `00020126580014br.gov.bcb.pix01${String(pixKey.length).padStart(2, '0')}${pixKey}520400005303986540${amtStr.length}${amtStr}5802BR5925${merchant}6009SAO PAULO62070503***6304E19F`;
       return {
         success: true,
         paymentId: 'pay_pix_' + Math.random().toString(36).substring(2, 9),
@@ -258,13 +289,21 @@ export const apiService = {
         pixCopyPaste,
         pixQrCode: '',
         expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-        bank: 'Itaú Unibanco S.A. (341)',
+        bank: `Itaú Unibanco S.A. (341${companyPayload?.agency ? ` - Ag. ${companyPayload.agency} Cc ${companyPayload.account}` : ''})`,
+        beneficiaryCompany: companyPayload?.razaoSocial || 'COLÉGIO MODELO ALPHA',
+        beneficiaryCnpj: companyPayload?.cnpj || '12.345.678/0001-90',
+        bankAccount: companyPayload ? `Ag. ${companyPayload.agency} · Cc ${companyPayload.account}` : 'Ag. 0910 · Cc 12345-6',
       };
     }
   },
 
-  // Itaú: Generate Boleto
-  async createItauBoleto(student: Student, amount: number): Promise<ItauBoletoResult> {
+  // Itaú: Generate Boleto (roteado por Empresa / CNPJ)
+  async createItauBoleto(
+    student: Student,
+    amount: number,
+    company?: CompanyEntity
+  ): Promise<ItauBoletoResult> {
+    const companyPayload = company ? buildCompanyApiPayload(company) : undefined;
     try {
       const res = await fetchWithTimeout('/api/itau/boleto/create', {
         method: 'POST',
@@ -276,11 +315,14 @@ export const apiService = {
           dueDate: student.dueDate,
           responsibleName: student.responsibleName,
           responsibleCpf: student.responsibleCpf,
+          company: companyPayload,
         }),
       });
       return await res.json();
     } catch {
       const linha = '34191.79001 01234.567890 12345.678901 7 98540000' + Math.round(amount * 100).toString().padStart(6, '0');
+      const beneficiaryCompany = companyPayload?.razaoSocial || 'Colégio Modelo Alpha';
+      const beneficiaryCnpj = companyPayload?.cnpj || '12.345.678/0001-90';
       return {
         success: true,
         paymentId: 'pay_bol_' + Math.random().toString(36).substring(2, 9),
@@ -291,13 +333,16 @@ export const apiService = {
         linhaDigitavel: linha,
         codigoBarras: '34197985400002500007900101234567890123456789',
         dueDate: student.dueDate,
-        beneficiary: 'Colégio Modelo Alpha - CNPJ 12.345.678/0001-90',
-        bank: 'Itaú Unibanco S.A. (341)',
+        beneficiary: `${beneficiaryCompany} - CNPJ ${beneficiaryCnpj}`,
+        bank: `Itaú Unibanco S.A. (341${companyPayload?.agency ? ` - Ag. ${companyPayload.agency} Cc ${companyPayload.account}` : ''})`,
+        beneficiaryCompany,
+        beneficiaryCnpj,
+        bankAccount: companyPayload ? `Ag. ${companyPayload.agency} · Cc ${companyPayload.account}` : 'Ag. 0910 · Cc 12345-6',
       };
     }
   },
 
-  // Itaú: Process Card
+  // Itaú: Process Card (roteado por Empresa / CNPJ)
   async processItauCard(data: {
     studentId: string;
     amount: number;
@@ -307,12 +352,17 @@ export const apiService = {
     cardExpiry: string;
     cardCvv: string;
     installments: number;
+    company?: CompanyEntity;
   }): Promise<ItauCardResult> {
+    const companyPayload = data.company ? buildCompanyApiPayload(data.company) : undefined;
     try {
       const res = await fetchWithTimeout('/api/itau/card/charge', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
+        body: JSON.stringify({
+          ...data,
+          company: companyPayload,
+        }),
       });
       return await res.json();
     } catch {
@@ -326,8 +376,11 @@ export const apiService = {
         amount: data.amount,
         cardLast4: data.cardNumber.slice(-4) || '4532',
         authorizationCode: 'AUTH_' + Math.floor(100000 + Math.random() * 900000),
-        acquirer: 'Itaú Rede Gateway',
+        acquirer: `Itaú Rede Gateway (${companyPayload?.nomeFantasia || 'Matriz'})`,
         message: 'Transação autorizada com sucesso pela adquirente Itaú.',
+        beneficiaryCompany: companyPayload?.razaoSocial,
+        beneficiaryCnpj: companyPayload?.cnpj,
+        bankAccount: companyPayload ? `Ag. ${companyPayload.agency} · Cc ${companyPayload.account}` : undefined,
       };
     }
   },
@@ -352,12 +405,13 @@ export const apiService = {
     }
   },
 
-  // Rede: Process Pix, Credit or Debit Payment
+  // Rede: Process Pix, Credit or Debit Payment (roteado por Empresa / CNPJ)
   async processRedePayment(payload: {
     paymentMethod: 'PIX' | 'CREDIT' | 'DEBIT';
     amount: number;
     installments?: number;
     studentId?: string;
+    company?: CompanyEntity;
     card?: {
       cardNumber: string;
       holderName: string;
@@ -371,12 +425,20 @@ export const apiService = {
       email?: string;
     };
   }): Promise<any> {
+    const companyPayload = payload.company ? buildCompanyApiPayload(payload.company) : undefined;
     const res = await fetchWithTimeout(
       '/api/rede/process-payment',
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          ...payload,
+          paymentMethod: payload.paymentMethod.toLowerCase(),
+          userId: payload.studentId,
+          customPv: companyPayload?.redePv,
+          customToken: companyPayload?.redeToken,
+          company: companyPayload,
+        }),
       },
       7500
     );

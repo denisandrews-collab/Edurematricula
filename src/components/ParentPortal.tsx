@@ -15,6 +15,13 @@ import { AutentiqueCertificateModal } from './AutentiqueCertificateModal';
 import { ContractDocumentViewer } from './ContractDocumentViewer';
 import { generateContractPdf } from '../utils/pdfGenerator';
 import { RedePaymentForm } from './RedePaymentForm';
+import {
+  formatCnpj,
+  getMatchSourceLabel,
+  getRegisteredCompanies,
+  resolveCompanyForStudent,
+  resolveContractTemplateForStudent,
+} from '../utils/companyResolver';
 import { QRCodeSVG } from 'qrcode.react';
 import { AnimatePresence, motion } from 'motion/react';
 import confetti from 'canvas-confetti';
@@ -217,6 +224,15 @@ export function ParentPortal({
   const [cardExpiry, setCardExpiry] = useState('12/28');
   const [cardCvv, setCardCvv] = useState('890');
 
+  // Multiempresa: Empresa Cobradora resolvida para este aluno (Override > Aluno > Turma > Série > Matriz)
+  const companiesList = getRegisteredCompanies(settings);
+  const { company: billedCompany, matchSource: billedMatchSource } = resolveCompanyForStudent(
+    student,
+    settings
+  );
+  const resolvedTemplate = resolveContractTemplateForStudent(template, student, settings);
+  const billedBankSummary = `Itaú Ag. ${billedCompany.itau.agency || '0910'} · Cc ${billedCompany.itau.account || '12345-6'}`;
+
   // Effective Installment Tiers & Options based on Student Base Value & Discount % and Proposal Campaign
   const studentBase = student.baseValue || student.finalValue || 2000;
   const effectiveCampaign = student.customProposalCampaign || settings?.itau?.proposalCampaign;
@@ -256,12 +272,12 @@ export function ParentPortal({
     }
   }, [currentStep]);
 
-  // Reset cached PIX/Boleto and step errors whenever active student changes
+  // Reset cached PIX/Boleto and step errors whenever active student or billed company changes
   useEffect(() => {
     setPixData(null);
     setBoletoData(null);
     setPortalErrorMessage(null);
-  }, [student.id]);
+  }, [student.id, billedCompany.id]);
 
   // Load Rede PIX or Itaú Boleto data when on step 3
   useEffect(() => {
@@ -273,6 +289,7 @@ export function ParentPortal({
             paymentMethod: 'PIX',
             amount: discountAmount,
             studentId: student.id,
+            company: billedCompany,
             customer: {
               name: student.responsibleName,
               cpf: student.responsibleCpf,
@@ -280,9 +297,10 @@ export function ParentPortal({
             },
           })
           .then((res) => {
+            const pixKey = billedCompany.itau.pixKey || 'financeiro@colegiomodeloalpha.com.br';
             const copyPaste =
               res.pix?.qrCode ||
-              `00020126580014br.gov.bcb.pix0136${student.id}520400005303986540${discountAmount.toFixed(2)}5802BR5925ESCOLA CRISTA MODELO ALPHA6009SAO PAULO62070503***6304ABCD`;
+              `00020126580014br.gov.bcb.pix01${String(pixKey.length).padStart(2, '0')}${pixKey}520400005303986540${discountAmount.toFixed(2)}5802BR5925COLEGIO6009SAO PAULO62070503***6304ABCD`;
             setPixData({
               copyPaste,
               qrCode: copyPaste,
@@ -291,7 +309,8 @@ export function ParentPortal({
             });
           })
           .catch(() => {
-            const copyPaste = `00020126580014br.gov.bcb.pix0136rede-${student.id}520400005303986540${discountAmount.toFixed(2)}5802BR5925ESCOLA CRISTA MODELO ALPHA6009SAO PAULO62070503***6304ABCD`;
+            const pixKey = billedCompany.itau.pixKey || 'financeiro@colegiomodeloalpha.com.br';
+            const copyPaste = `00020126580014br.gov.bcb.pix01${String(pixKey.length).padStart(2, '0')}${pixKey}520400005303986540${discountAmount.toFixed(2)}5802BR5925COLEGIO6009SAO PAULO62070503***6304ABCD`;
             setPixData({
               copyPaste,
               qrCode: copyPaste,
@@ -300,7 +319,7 @@ export function ParentPortal({
             });
           });
       } else if (paymentMethod === 'BOLETO' && !boletoData) {
-        apiService.createItauBoleto(student, student.finalValue).then((res) => {
+        apiService.createItauBoleto(student, student.finalValue, billedCompany).then((res) => {
           setBoletoData({
             linhaDigitavel: res.linhaDigitavel,
             barcode: res.codigoBarras,
@@ -309,7 +328,7 @@ export function ParentPortal({
         });
       }
     }
-  }, [currentStep, paymentMethod, student.id, student.finalValue, pixDiscountPercent, pixData, boletoData]);
+  }, [currentStep, paymentMethod, student.id, student.finalValue, pixDiscountPercent, pixData, boletoData, billedCompany]);
 
   // Generate or Resend OTP validation code
   const handleGenerateOtp = () => {
@@ -522,6 +541,7 @@ export function ParentPortal({
         amount: amountToCharge,
         installments: installmentsToUse,
         studentId: student.id,
+        company: billedCompany,
         customer: {
           name: student.responsibleName,
           cpf: student.responsibleCpf,
@@ -544,14 +564,18 @@ export function ParentPortal({
         selectedInstallments: isInstallmentMethod ? installmentsToUse : 1,
         selectedInstallmentValue: isInstallmentMethod ? currentInstallmentOption.installmentValue : amountToCharge,
         selectedTotalAmount: amountToCharge,
+        billedCompanyId: billedCompany.id,
+        billedCompanyName: billedCompany.razaoSocial,
+        billedCompanyCnpj: billedCompany.cnpj,
+        billedBankSummary,
         historyLogs: [
           ...student.historyLogs,
           {
             timestamp: new Date().toISOString(),
-            action: `Pagamento da Rematrícula Liquidado via Gateway Rede Itaú (${paymentType})`,
+            action: `Pagamento Liquidado via Rede (${billedCompany.nomeFantasia} · ${paymentType})`,
             details: isInstallmentMethod
-              ? `Autorizado com sucesso (TID: ${res.tid || 'AUT_REDE'}) em ${installmentsToUse}x de ${formatCurrency(currentInstallmentOption.installmentValue)} (Total: ${formatCurrency(amountToCharge)}). Vaga garantida.`
-              : `Autorizado com sucesso (TID: ${res.tid || 'AUT_REDE'}). Valor de ${formatCurrency(amountToCharge)} liquidado. Vaga garantida.`,
+              ? `Autorizado (TID: ${res.tid || 'AUT_REDE'}) em ${installmentsToUse}x de ${formatCurrency(currentInstallmentOption.installmentValue)} (Total: ${formatCurrency(amountToCharge)}) · CNPJ ${formatCnpj(billedCompany.cnpj)} (${billedBankSummary}).`
+              : `Autorizado (TID: ${res.tid || 'AUT_REDE'}). Valor ${formatCurrency(amountToCharge)} liquidado para CNPJ ${formatCnpj(billedCompany.cnpj)} (${billedBankSummary}).`,
           },
         ],
       };
@@ -598,12 +622,16 @@ export function ParentPortal({
         selectedInstallments: installments,
         selectedInstallmentValue: currentInstallmentOption.installmentValue,
         selectedTotalAmount: amountToCharge,
+        billedCompanyId: billedCompany.id,
+        billedCompanyName: billedCompany.razaoSocial,
+        billedCompanyCnpj: billedCompany.cnpj,
+        billedBankSummary,
         historyLogs: [
           ...student.historyLogs,
           {
             timestamp: new Date().toISOString(),
-            action: `Carnê Escolar Emitido com Sucesso (${installments}x)`,
-            details: `Carnê de ${installments}x de ${formatCurrency(currentInstallmentOption.installmentValue)} emitido pelo Banco Itaú. Vaga garantida.`,
+            action: `Carnê Escolar Emitido (${billedCompany.nomeFantasia} · ${installments}x)`,
+            details: `Carnê de ${installments}x de ${formatCurrency(currentInstallmentOption.installmentValue)} emitido em favor de ${billedCompany.razaoSocial} (CNPJ ${formatCnpj(billedCompany.cnpj)} · ${billedBankSummary}).`,
           },
         ],
       };
@@ -633,6 +661,7 @@ export function ParentPortal({
           cardExpiry: cardExpiry || '12/28',
           cardCvv: cardCvv || '123',
           installments: Number(installments),
+          company: billedCompany,
         });
       } else {
         await apiService.simulateItauPaymentConfirm(student.itauPaymentId || 'pay_' + student.id);
@@ -652,14 +681,18 @@ export function ParentPortal({
         selectedInstallments: isInstallmentMethod ? installments : 1,
         selectedInstallmentValue: isInstallmentMethod ? currentInstallmentOption.installmentValue : finalChargedAmount,
         selectedTotalAmount: finalChargedAmount,
+        billedCompanyId: billedCompany.id,
+        billedCompanyName: billedCompany.razaoSocial,
+        billedCompanyCnpj: billedCompany.cnpj,
+        billedBankSummary,
         historyLogs: [
           ...student.historyLogs,
           {
             timestamp: new Date().toISOString(),
-            action: `Pagamento da Rematrícula Confirmado via API Itaú (${paymentType})`,
+            action: `Pagamento Confirmado (${billedCompany.nomeFantasia} · ${paymentType})`,
             details: isInstallmentMethod
-              ? `Liquidado em ${installments}x de ${formatCurrency(currentInstallmentOption.installmentValue)} (Total: ${formatCurrency(finalChargedAmount)}). Faixa: ${currentInstallmentOption.tierDescription}. Vaga garantida para o ano letivo ${template.academicYear}.`
-              : `Valor de ${formatCurrency(finalChargedAmount)} liquidado com sucesso. Vaga garantida para o ano letivo ${template.academicYear}.`,
+              ? `Liquidado em ${installments}x de ${formatCurrency(currentInstallmentOption.installmentValue)} (Total: ${formatCurrency(finalChargedAmount)}) para CNPJ ${formatCnpj(billedCompany.cnpj)} (${billedBankSummary}).`
+              : `Valor de ${formatCurrency(finalChargedAmount)} creditado para CNPJ ${formatCnpj(billedCompany.cnpj)} (${billedBankSummary}).`,
           },
         ],
       };
@@ -690,14 +723,18 @@ export function ParentPortal({
       selectedInstallments: isInstallmentMethod ? installments : 1,
       selectedInstallmentValue: isInstallmentMethod ? currentInstallmentOption.installmentValue : finalChargedAmount,
       selectedTotalAmount: finalChargedAmount,
+      billedCompanyId: billedCompany.id,
+      billedCompanyName: billedCompany.razaoSocial,
+      billedCompanyCnpj: billedCompany.cnpj,
+      billedBankSummary,
       historyLogs: [
         ...student.historyLogs,
         {
           timestamp: new Date().toISOString(),
-          action: `Pagamento da Rematrícula Liquidado via Gateway Rede Itaú (${paymentType})`,
+          action: `Pagamento Liquidado via Rede Itaú (${billedCompany.nomeFantasia} · ${paymentType})`,
           details: isInstallmentMethod
-            ? `Autorizado com sucesso (TID: ${tid}) em ${installments}x de ${formatCurrency(currentInstallmentOption.installmentValue)} (Total: ${formatCurrency(finalChargedAmount)}). Vaga garantida.`
-            : `Autorizado com sucesso (TID: ${tid}). Valor de ${formatCurrency(finalChargedAmount)} liquidado. Vaga garantida.`,
+            ? `Autorizado (TID: ${tid}) em ${installments}x de ${formatCurrency(currentInstallmentOption.installmentValue)} (Total: ${formatCurrency(finalChargedAmount)}) para CNPJ ${formatCnpj(billedCompany.cnpj)} (${billedBankSummary}).`
+            : `Autorizado (TID: ${tid}). Valor ${formatCurrency(finalChargedAmount)} liquidado para CNPJ ${formatCnpj(billedCompany.cnpj)} (${billedBankSummary}).`,
         },
       ],
     };
@@ -707,7 +744,7 @@ export function ParentPortal({
     setCurrentStep(4);
   };
 
-  const dynamicContractText = replaceContractPlaceholders(template.content, student, template);
+  const dynamicContractText = replaceContractPlaceholders(resolvedTemplate.content, student, resolvedTemplate);
 
   return (
     <div className="max-w-4xl mx-auto space-y-6 pb-12">
@@ -1151,7 +1188,7 @@ export function ParentPortal({
               </div>
               <button
                 type="button"
-                onClick={() => generateContractPdf(student, template, dynamicContractText)}
+                onClick={() => generateContractPdf(student, resolvedTemplate, dynamicContractText)}
                 className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition shadow-xs cursor-pointer"
                 title="Baixar Contrato Oficial em formato PDF"
               >
@@ -1173,7 +1210,7 @@ export function ParentPortal({
           {/* Institutional Executive Contract Document Viewer with Paper Simulation & Controls */}
           <ContractDocumentViewer
             student={student}
-            template={template}
+            template={resolvedTemplate}
             rawContractText={dynamicContractText}
             isSigned={isFullySigned}
             isSigner1Signed={isSigner1Signed}
@@ -1787,6 +1824,7 @@ export function ParentPortal({
                 amount={currentPaymentAmount}
                 uid={student.id}
                 student={student}
+                company={billedCompany}
                 installmentsCount={installments}
                 installmentAmount={currentInstallmentOption.installmentValue}
                 onSuccess={handleRedePaymentSuccess}
@@ -1795,6 +1833,62 @@ export function ParentPortal({
             </div>
           ) : (
             <div className="bg-white rounded-2xl p-6 sm:p-8 border border-slate-200 shadow-xs space-y-6">
+              {/* Multiempresa Receiving Account Banner + Mix Switcher */}
+              <div className="bg-slate-50 border border-slate-200/90 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                <div className="space-y-0.5 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-bold text-slate-900 flex items-center gap-1.5">
+                      <Building className="w-4 h-4 text-indigo-600 shrink-0" />
+                      <span>Empresa Recebedora: {billedCompany.nomeFantasia}</span>
+                    </span>
+                    <span className="px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200/80 text-[10px] font-bold">
+                      {getMatchSourceLabel(billedMatchSource)}
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-slate-600 font-mono tabular-nums truncate">
+                    CNPJ: {formatCnpj(billedCompany.cnpj)} · {billedBankSummary} · PIX: {billedCompany.itau.pixKey || 'padrão'}
+                  </div>
+                </div>
+
+                {companiesList.length > 1 && (
+                  <div className="flex items-center gap-2 shrink-0">
+                    <label htmlFor="checkout-company-mix-select" className="text-[11px] font-semibold text-slate-500 whitespace-nowrap">
+                      Cobrar no CNPJ:
+                    </label>
+                    <select
+                      id="checkout-company-mix-select"
+                      value={student.companyId || ''}
+                      onChange={(e) => {
+                        const nextId = e.target.value || undefined;
+                        const nextComp = companiesList.find((c) => c.id === nextId);
+                        onUpdateStudent({
+                          ...student,
+                          companyId: nextId,
+                          historyLogs: [
+                            ...student.historyLogs,
+                            {
+                              timestamp: new Date().toISOString(),
+                              action: 'Mix de Empresa Alterado no Checkout',
+                              details: nextComp
+                                ? `Cobrança direcionada para ${nextComp.nomeFantasia} (CNPJ ${formatCnpj(nextComp.cnpj)}).`
+                                : 'Restaurado roteamento automático por Série/Turma.',
+                            },
+                          ],
+                        });
+                      }}
+                      className="px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+                    >
+                      <option value="">Automático ({billedCompany.nomeFantasia})</option>
+                      {companiesList.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.nomeFantasia} ({formatCnpj(c.cnpj)})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+
               {/* Rede Fast Checkout Banner */}
               <div className="bg-gradient-to-r from-orange-50 via-amber-50 to-orange-50 border border-orange-200/80 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-xs">
                 <div className="flex items-center gap-3">
@@ -1809,7 +1903,7 @@ export function ParentPortal({
                       </span>
                     </h3>
                     <p className="text-[11px] text-slate-600">
-                      Escola Cristã Modelo Alpha Ltda • Pix Instantâneo e Cartão com verificação em tempo real.
+                      {billedCompany.razaoSocial} · CNPJ {formatCnpj(billedCompany.cnpj)} · Pix Instantâneo e Cartão.
                     </p>
                   </div>
                 </div>
@@ -2008,7 +2102,8 @@ export function ParentPortal({
                 </div>
 
                 <div className="bg-slate-50 p-3 rounded-xl border border-slate-200/80 text-[11px] text-slate-600 space-y-1">
-                  <div><strong>Beneficiário:</strong> {template.schoolName} (CNPJ {template.schoolCnpj})</div>
+                  <div><strong>Beneficiário:</strong> {billedCompany.razaoSocial} (CNPJ {formatCnpj(billedCompany.cnpj)})</div>
+                  <div><strong>Conta Destino:</strong> {billedBankSummary}</div>
                   <div><strong>Pagador:</strong> {student.responsibleName} (CPF: {formatCpf(student.responsibleCpf)})</div>
                   <div><strong>Valor Documento:</strong> {formatCurrency(student.finalValue)}</div>
                 </div>
@@ -2426,7 +2521,10 @@ export function ParentPortal({
                 <strong>Autenticação Autentique:</strong> {student.autentiqueDocId || 'autq_2026'} (Certificado Válido)
               </div>
               <div>
-                <strong>Instituição:</strong> {template.schoolName} (CNPJ: {template.schoolCnpj})
+                <strong>Empresa Recebedora:</strong> {student.billedCompanyName || billedCompany.razaoSocial} (CNPJ: {formatCnpj(student.billedCompanyCnpj || billedCompany.cnpj)})
+              </div>
+              <div>
+                <strong>Conta de Crédito:</strong> {student.billedBankSummary || billedBankSummary}
               </div>
             </div>
           </div>
@@ -2434,7 +2532,7 @@ export function ParentPortal({
           {/* Action buttons */}
           <div className="flex flex-wrap justify-center gap-3 pt-2">
             <button
-              onClick={() => generateContractPdf(student, template, dynamicContractText)}
+              onClick={() => generateContractPdf(student, resolvedTemplate, dynamicContractText)}
               className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs flex items-center gap-2 shadow-xs cursor-pointer transition"
             >
               <Download className="w-4 h-4" />
@@ -2479,7 +2577,7 @@ export function ParentPortal({
       {isCertModalOpen && (
         <AutentiqueCertificateModal
           student={student}
-          template={template}
+          template={resolvedTemplate}
           isOpen={isCertModalOpen}
           onClose={() => setIsCertModalOpen(false)}
         />

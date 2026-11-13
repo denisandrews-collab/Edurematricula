@@ -1,0 +1,851 @@
+import React, { useMemo, useState } from 'react';
+import {
+  BillingCompanyRule,
+  CompanyEntity,
+  IntegrationSettings,
+  Student,
+} from '../types';
+import {
+  formatCnpj,
+  getBillingRules,
+  getRegisteredCompanies,
+  resolveCompanyForStudent,
+} from '../utils/companyResolver';
+import {
+  Building2,
+  Plus,
+  Edit3,
+  Trash2,
+  CheckCircle2,
+  Landmark,
+  GitBranch,
+  Star,
+  X,
+  Save,
+  CreditCard,
+  QrCode,
+  AlertCircle,
+} from 'lucide-react';
+
+interface Props {
+  settings: IntegrationSettings;
+  onUpdateSettings: (updated: IntegrationSettings) => void;
+  students?: Student[];
+  compactMode?: boolean;
+}
+
+const EMPTY_COMPANY_DRAFT = (): CompanyEntity => ({
+  id: 'comp_' + Date.now().toString(36),
+  razaoSocial: '',
+  nomeFantasia: '',
+  cnpj: '',
+  isDefault: false,
+  active: true,
+  address: '',
+  city: 'São Paulo',
+  state: 'SP',
+  representative: '',
+  representativeCpf: '',
+  representativeRole: 'Sócio Administrador',
+  phone: '',
+  email: '',
+  itau: {
+    pixKey: '',
+    agency: '',
+    account: '',
+    wallet: '109',
+    environment: 'sandbox',
+    clientId: '',
+    clientSecret: '',
+  },
+  rede: {
+    pv: '',
+    token: '',
+    softDescriptor: '',
+    sandbox: true,
+    enabled: true,
+  },
+});
+
+export function MultiCompanyManager({
+  settings,
+  onUpdateSettings,
+  students = [],
+  compactMode = false,
+}: Props) {
+  const companies = getRegisteredCompanies(settings);
+  const billingRules = getBillingRules(settings);
+
+  const [editingCompany, setEditingCompany] = useState<CompanyEntity | null>(null);
+  const [isNewCompany, setIsNewCompany] = useState(false);
+
+  // Rule builder state
+  const [ruleScope, setRuleScope] = useState<'serie' | 'turma'>('serie');
+  const [ruleTargetValue, setRuleTargetValue] = useState('');
+  const [ruleCustomTarget, setRuleCustomTarget] = useState('');
+  const [ruleCompanyId, setRuleCompanyId] = useState<string>(companies[0]?.id || '');
+  const [feedback, setFeedback] = useState<string | null>(null);
+
+  const uniqueSeries = useMemo(() => {
+    const base = new Set<string>(students.map((s) => s.serie).filter(Boolean));
+    base.add('Berçário');
+    base.add('Educação Infantil - Maternal');
+    base.add('Educação Infantil - Pré I');
+    base.add('Educação Infantil - Pré II');
+    return Array.from(base);
+  }, [students]);
+
+  const uniqueTurmas = useMemo(() => {
+    const base = new Set<string>(students.map((s) => s.turma).filter(Boolean));
+    base.add('Berçário Integral');
+    base.add('Berçário Matutino');
+    base.add('Infantil II - Integral');
+    return Array.from(base);
+  }, [students]);
+
+  const showNotice = (msg: string) => {
+    setFeedback(msg);
+    setTimeout(() => setFeedback(null), 3500);
+  };
+
+  const commitCompanies = (nextCompanies: CompanyEntity[]) => {
+    const defaultComp =
+      nextCompanies.find((c) => c.isDefault && c.active) || nextCompanies[0];
+
+    onUpdateSettings({
+      ...settings,
+      companies: nextCompanies,
+      itau: defaultComp
+        ? {
+            ...settings.itau,
+            pixKey: defaultComp.itau.pixKey || settings.itau.pixKey,
+            agency: defaultComp.itau.agency || settings.itau.agency,
+            account: defaultComp.itau.account || settings.itau.account,
+            wallet: defaultComp.itau.wallet || settings.itau.wallet,
+          }
+        : settings.itau,
+      rede: defaultComp
+        ? {
+            ...settings.rede,
+            pv: defaultComp.rede.pv || settings.rede?.pv || '',
+            token: defaultComp.rede.token || settings.rede?.token || '',
+            softDescriptor:
+              defaultComp.rede.softDescriptor || settings.rede?.softDescriptor || '',
+            sandbox: defaultComp.rede.sandbox ?? settings.rede?.sandbox ?? true,
+            enabled: defaultComp.rede.enabled ?? settings.rede?.enabled ?? true,
+          }
+        : settings.rede,
+    });
+  };
+
+  const handleOpenNewCompany = () => {
+    setIsNewCompany(true);
+    setEditingCompany(EMPTY_COMPANY_DRAFT());
+  };
+
+  const handleOpenEditCompany = (company: CompanyEntity) => {
+    setIsNewCompany(false);
+    setEditingCompany({
+      ...company,
+      itau: { ...company.itau },
+      rede: { ...company.rede },
+    });
+  };
+
+  const handleSaveCompany = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingCompany) return;
+    if (!editingCompany.razaoSocial.trim() || !editingCompany.cnpj.trim()) {
+      return;
+    }
+
+    const formattedCompany: CompanyEntity = {
+      ...editingCompany,
+      razaoSocial: editingCompany.razaoSocial.trim(),
+      nomeFantasia:
+        editingCompany.nomeFantasia.trim() || editingCompany.razaoSocial.trim(),
+      cnpj: formatCnpj(editingCompany.cnpj.trim()),
+    };
+
+    let nextCompanies: CompanyEntity[];
+    if (isNewCompany) {
+      nextCompanies = [...companies, formattedCompany];
+    } else {
+      nextCompanies = companies.map((c) =>
+        c.id === formattedCompany.id ? formattedCompany : c
+      );
+    }
+
+    if (formattedCompany.isDefault) {
+      nextCompanies = nextCompanies.map((c) => ({
+        ...c,
+        isDefault: c.id === formattedCompany.id,
+      }));
+    }
+
+    commitCompanies(nextCompanies);
+    setEditingCompany(null);
+    showNotice(`Empresa "${formattedCompany.nomeFantasia}" (${formattedCompany.cnpj}) salva.`);
+  };
+
+  const handleSetDefaultCompany = (companyId: string) => {
+    const next = companies.map((c) => ({
+      ...c,
+      isDefault: c.id === companyId,
+      active: c.id === companyId ? true : c.active,
+    }));
+    commitCompanies(next);
+    showNotice('Empresa matriz padrão atualizada.');
+  };
+
+  const handleDeleteCompany = (companyId: string) => {
+    if (companies.length <= 1) return;
+    const target = companies.find((c) => c.id === companyId);
+    if (!target) return;
+    const remaining = companies.filter((c) => c.id !== companyId);
+    if (target.isDefault && remaining.length > 0) {
+      remaining[0] = { ...remaining[0], isDefault: true };
+    }
+    const nextRules = billingRules.filter((r) => r.companyId !== companyId);
+    onUpdateSettings({
+      ...settings,
+      companies: remaining,
+      billingRules: nextRules,
+    });
+    showNotice(`Empresa "${target.nomeFantasia}" removida e vínculos ajustados.`);
+  };
+
+  const handleAddOrUpdateRule = (e: React.FormEvent) => {
+    e.preventDefault();
+    const target = (ruleTargetValue === '__custom__' ? ruleCustomTarget : ruleTargetValue).trim();
+    if (!target || !ruleCompanyId) return;
+
+    const existingIndex = billingRules.findIndex(
+      (r) => r.scope === ruleScope && r.targetValue.toLowerCase() === target.toLowerCase()
+    );
+
+    const newRule: BillingCompanyRule = {
+      id: existingIndex >= 0 ? billingRules[existingIndex].id : 'rule_' + Date.now().toString(36),
+      scope: ruleScope,
+      targetValue: target,
+      companyId: ruleCompanyId,
+      updatedAt: new Date().toISOString(),
+    };
+
+    const nextRules =
+      existingIndex >= 0
+        ? billingRules.map((r, i) => (i === existingIndex ? newRule : r))
+        : [...billingRules, newRule];
+
+    onUpdateSettings({
+      ...settings,
+      billingRules: nextRules,
+    });
+
+    setRuleTargetValue('');
+    setRuleCustomTarget('');
+    const comp = companies.find((c) => c.id === ruleCompanyId);
+    showNotice(
+      `Vínculo aplicado: ${ruleScope === 'serie' ? 'Série' : 'Turma'} "${target}" → ${comp?.nomeFantasia || 'CNPJ'} (${comp?.cnpj || ''}).`
+    );
+  };
+
+  const handleDeleteRule = (ruleId: string) => {
+    onUpdateSettings({
+      ...settings,
+      billingRules: billingRules.filter((r) => r.id !== ruleId),
+    });
+  };
+
+  const scopeOptions = ruleScope === 'serie' ? uniqueSeries : uniqueTurmas;
+
+  return (
+    <div className="bg-white rounded-2xl p-6 border border-slate-200/90 shadow-xs space-y-6">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100">
+        <div className="flex items-start gap-3">
+          <div className="w-10 h-10 rounded-xl bg-indigo-50 border border-indigo-200/80 text-indigo-700 flex items-center justify-center shrink-0">
+            <Building2 className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 className="text-base font-bold text-slate-900 tracking-tight">
+                Cadastro Multiempresa (CNPJs & Contas Recebedoras)
+              </h2>
+              <span className="text-[11px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200/70 px-2 py-0.5 rounded-md tabular-nums">
+                {companies.length} {companies.length === 1 ? 'empresa' : 'empresas'}
+              </span>
+            </div>
+            <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
+              Cadastre todas as empresas do grupo com seus respectivos CNPJs, chaves PIX, contas Itaú e PV e.Rede para que cada cobrança caia na conta correta.
+            </p>
+          </div>
+        </div>
+
+        <button
+          id="btn-add-company"
+          type="button"
+          onClick={handleOpenNewCompany}
+          className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition shadow-xs cursor-pointer whitespace-nowrap shrink-0 self-start sm:self-auto"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          <span>Cadastrar Nova Empresa</span>
+        </button>
+      </div>
+
+      {feedback && (
+        <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-xs flex items-center gap-2 font-medium">
+          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+          <span>{feedback}</span>
+        </div>
+      )}
+
+      {/* Registered Companies List */}
+      <div className={`grid grid-cols-1 ${compactMode ? '' : 'md:grid-cols-2'} gap-4`}>
+        {companies.map((company) => {
+          const routedStudentsCount = students.filter(
+            (s) => resolveCompanyForStudent(s, settings).company.id === company.id
+          ).length;
+
+          return (
+            <div
+              key={company.id}
+              className={`rounded-xl border p-4 transition-colors space-y-3 ${
+                company.isDefault
+                  ? 'bg-indigo-50/35 border-indigo-200'
+                  : 'bg-slate-50/70 border-slate-200'
+              }`}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-sm font-bold text-slate-900 truncate">
+                      {company.nomeFantasia}
+                    </h3>
+                    {company.isDefault && (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800 border border-indigo-200">
+                        <Star className="w-2.5 h-2.5 fill-indigo-600 text-indigo-600" />
+                        Matriz Padrão
+                      </span>
+                    )}
+                    {!company.active && (
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-200 text-slate-600">
+                        Inativa
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-slate-600 font-medium truncate mt-0.5">
+                    {company.razaoSocial}
+                  </p>
+                  <div className="text-xs font-mono font-bold text-slate-800 mt-1 tabular-nums">
+                    CNPJ: {formatCnpj(company.cnpj)}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1 shrink-0">
+                  {!company.isDefault && (
+                    <button
+                      type="button"
+                      onClick={() => handleSetDefaultCompany(company.id)}
+                      title="Definir como empresa matriz padrão"
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-700 hover:bg-indigo-50 transition cursor-pointer"
+                    >
+                      <Star className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => handleOpenEditCompany(company)}
+                    title="Editar dados bancários e cadastrais da empresa"
+                    className="p-1.5 rounded-lg text-slate-500 hover:text-indigo-700 hover:bg-white border border-transparent hover:border-slate-200 transition cursor-pointer"
+                  >
+                    <Edit3 className="w-3.5 h-3.5" />
+                  </button>
+                  {companies.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteCompany(company.id)}
+                      title="Remover empresa"
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Clean metadata grid (unboxed, scannable) */}
+              <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-200/70 text-[11px]">
+                <div className="flex items-start gap-1.5">
+                  <Landmark className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="text-slate-400 block">Conta Itaú Recebedora</span>
+                    <span className="font-mono font-semibold text-slate-800 tabular-nums">
+                      Ag. {company.itau.agency || '—'} · Cc {company.itau.account || '—'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-1.5">
+                  <QrCode className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
+                  <div className="min-w-0">
+                    <span className="text-slate-400 block">Chave PIX da Empresa</span>
+                    <span className="font-mono font-semibold text-slate-800 truncate block">
+                      {company.itau.pixKey || 'Não configurada'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-1.5">
+                  <CreditCard className="w-3.5 h-3.5 text-orange-500 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="text-slate-400 block">Filiação e.Rede (PV)</span>
+                    <span className="font-mono font-semibold text-slate-800 tabular-nums">
+                      {company.rede.pv || 'Sandbox'}
+                    </span>
+                  </div>
+                </div>
+
+                {students.length > 0 && (
+                  <div>
+                    <span className="text-slate-400 block">Alunos Vinculados</span>
+                    <span className="font-bold text-indigo-700 tabular-nums">
+                      {routedStudentsCount} {routedStudentsCount === 1 ? 'aluno' : 'alunos'}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Regras de Vinculação: Série / Turma -> CNPJ */}
+      <div className="pt-4 border-t border-slate-200/80 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+              <GitBranch className="w-4 h-4 text-indigo-600" />
+              <span>Regras de Roteamento por Série ou Turma (CNPJ Cobrador)</span>
+            </h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Vincule o CNPJ total de uma empresa para uma <strong>Série</strong> (ex.: Berçário, Educação Infantil) ou <strong>Turma</strong> específica. Turmas têm prioridade sobre Séries.
+            </p>
+          </div>
+        </div>
+
+        <form
+          onSubmit={handleAddOrUpdateRule}
+          className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 bg-slate-50 p-3.5 rounded-xl border border-slate-200/80 text-xs items-end"
+        >
+          <div className="sm:col-span-2">
+            <label className="block font-semibold text-slate-700 mb-1">Tipo</label>
+            <select
+              value={ruleScope}
+              onChange={(e) => {
+                setRuleScope(e.target.value as 'serie' | 'turma');
+                setRuleTargetValue('');
+              }}
+              className="w-full px-2.5 py-2 bg-white border border-slate-200 rounded-lg font-medium text-slate-800"
+            >
+              <option value="serie">Por Série</option>
+              <option value="turma">Por Turma</option>
+            </select>
+          </div>
+
+          <div className="sm:col-span-4">
+            <label className="block font-semibold text-slate-700 mb-1">
+              {ruleScope === 'serie' ? 'Série / Segmento' : 'Turma'}
+            </label>
+            {ruleTargetValue === '__custom__' ? (
+              <div className="flex gap-1.5">
+                <input
+                  type="text"
+                  value={ruleCustomTarget}
+                  onChange={(e) => setRuleCustomTarget(e.target.value)}
+                  placeholder={ruleScope === 'serie' ? 'Ex: Berçário' : 'Ex: Berçário A'}
+                  className="w-full px-2.5 py-2 bg-white border border-indigo-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setRuleTargetValue('')}
+                  className="px-2 bg-slate-200 hover:bg-slate-300 rounded-lg text-slate-700 font-bold cursor-pointer"
+                >
+                  Lista
+                </button>
+              </div>
+            ) : (
+              <select
+                value={ruleTargetValue}
+                onChange={(e) => setRuleTargetValue(e.target.value)}
+                className="w-full px-2.5 py-2 bg-white border border-slate-200 rounded-lg text-slate-800 font-medium"
+                required
+              >
+                <option value="">Selecione...</option>
+                {scopeOptions.map((opt) => (
+                  <option key={opt} value={opt}>
+                    {opt}
+                  </option>
+                ))}
+                <option value="__custom__">+ Digitar outra {ruleScope === 'serie' ? 'Série' : 'Turma'}...</option>
+              </select>
+            )}
+          </div>
+
+          <div className="sm:col-span-4">
+            <label className="block font-semibold text-slate-700 mb-1">Empresa / CNPJ Recebedor</label>
+            <select
+              value={ruleCompanyId}
+              onChange={(e) => setRuleCompanyId(e.target.value)}
+              className="w-full px-2.5 py-2 bg-white border border-slate-200 rounded-lg text-slate-800 font-medium"
+              required
+            >
+              {companies.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.nomeFantasia} ({formatCnpj(c.cnpj)})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="sm:col-span-2">
+            <button
+              type="submit"
+              className="w-full py-2 px-3 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-semibold transition cursor-pointer flex items-center justify-center gap-1 whitespace-nowrap"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Vincular CNPJ</span>
+            </button>
+          </div>
+        </form>
+
+        {/* Active Rules Table */}
+        {billingRules.length === 0 ? (
+          <div className="p-4 bg-slate-50/70 rounded-xl border border-dashed border-slate-200 text-xs text-slate-500 flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-slate-400 shrink-0" />
+            <span>
+              Nenhuma regra específica por série ou turma cadastrada. Todas as cobranças serão direcionadas para a Matriz Padrão.
+            </span>
+          </div>
+        ) : (
+          <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden text-xs">
+            {billingRules.map((rule) => {
+              const targetCompany = companies.find((c) => c.id === rule.companyId);
+              const matchingCount = students.filter((s) =>
+                rule.scope === 'turma'
+                  ? s.turma?.toLowerCase() === rule.targetValue.toLowerCase()
+                  : s.serie?.toLowerCase() === rule.targetValue.toLowerCase()
+              ).length;
+
+              return (
+                <div
+                  key={rule.id}
+                  className="px-4 py-2.5 bg-white hover:bg-slate-50/70 flex flex-wrap items-center justify-between gap-2"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <span
+                      className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded ${
+                        rule.scope === 'turma'
+                          ? 'bg-amber-50 text-amber-800 border border-amber-200'
+                          : 'bg-indigo-50 text-indigo-800 border border-indigo-200'
+                      }`}
+                    >
+                      {rule.scope === 'turma' ? 'Turma' : 'Série'}
+                    </span>
+                    <span className="font-bold text-slate-900 truncate">{rule.targetValue}</span>
+                    {students.length > 0 && (
+                      <span className="text-[11px] text-slate-400 tabular-nums">
+                        · {matchingCount} {matchingCount === 1 ? 'aluno' : 'alunos'}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <div className="text-right">
+                      <span className="font-semibold text-slate-800">
+                        {targetCompany?.nomeFantasia || 'Empresa removida'}
+                      </span>
+                      <span className="text-slate-400 mx-1.5">·</span>
+                      <span className="font-mono text-slate-600 tabular-nums">
+                        {targetCompany ? formatCnpj(targetCompany.cnpj) : '—'}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteRule(rule.id)}
+                      className="p-1 text-slate-400 hover:text-rose-600 rounded transition cursor-pointer"
+                      title="Remover regra"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Add / Edit Company Modal */}
+      {editingCompany && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl border border-slate-200 space-y-5 my-8">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-700 flex items-center justify-center">
+                  <Building2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">
+                    {isNewCompany ? 'Cadastrar Nova Empresa' : `Editar Empresa: ${editingCompany.nomeFantasia}`}
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Dados jurídicos (CNPJ) e conta bancária recebedora (Itaú / PIX / e.Rede).
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingCompany(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveCompany} className="space-y-4 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="sm:col-span-2">
+                  <label className="block font-semibold text-slate-700 mb-1">Razão Social *</label>
+                  <input
+                    type="text"
+                    required
+                    value={editingCompany.razaoSocial}
+                    onChange={(e) =>
+                      setEditingCompany({ ...editingCompany, razaoSocial: e.target.value })
+                    }
+                    placeholder="Ex: ALPHA BERÇÁRIO E EDUCAÇÃO INFANTIL LTDA"
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Nome Fantasia *</label>
+                  <input
+                    type="text"
+                    required
+                    value={editingCompany.nomeFantasia}
+                    onChange={(e) =>
+                      setEditingCompany({ ...editingCompany, nomeFantasia: e.target.value })
+                    }
+                    placeholder="Ex: Unidade Berçário Alpha"
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">CNPJ Completo *</label>
+                  <input
+                    type="text"
+                    required
+                    value={editingCompany.cnpj}
+                    onChange={(e) =>
+                      setEditingCompany({ ...editingCompany, cnpj: e.target.value })
+                    }
+                    placeholder="00.000.000/0001-00"
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl font-mono focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Representante Legal</label>
+                  <input
+                    type="text"
+                    value={editingCompany.representative || ''}
+                    onChange={(e) =>
+                      setEditingCompany({ ...editingCompany, representative: e.target.value })
+                    }
+                    placeholder="Nome do diretor / sócio"
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">CPF do Representante</label>
+                  <input
+                    type="text"
+                    value={editingCompany.representativeCpf || ''}
+                    onChange={(e) =>
+                      setEditingCompany({ ...editingCompany, representativeCpf: e.target.value })
+                    }
+                    placeholder="000.000.000-00"
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl font-mono"
+                  />
+                </div>
+
+                <div className="sm:col-span-2">
+                  <label className="block font-semibold text-slate-700 mb-1">Endereço da Unidade / Empresa</label>
+                  <input
+                    type="text"
+                    value={editingCompany.address || ''}
+                    onChange={(e) =>
+                      setEditingCompany({ ...editingCompany, address: e.target.value })
+                    }
+                    placeholder="Rua, número, bairro - Cidade/UF"
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl"
+                  />
+                </div>
+              </div>
+
+              {/* Itaú Account Box */}
+              <div className="p-3.5 bg-amber-50/50 border border-amber-200/80 rounded-xl space-y-3">
+                <div className="font-bold text-amber-900 flex items-center gap-1.5">
+                  <Landmark className="w-4 h-4 text-amber-600" />
+                  <span>Conta Bancária Recebedora (Itaú / PIX / Boleto)</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5">
+                  <div className="sm:col-span-2">
+                    <label className="block font-semibold text-slate-700 mb-1">Chave PIX da Empresa *</label>
+                    <input
+                      type="text"
+                      required
+                      value={editingCompany.itau.pixKey}
+                      onChange={(e) =>
+                        setEditingCompany({
+                          ...editingCompany,
+                          itau: { ...editingCompany.itau, pixKey: e.target.value },
+                        })
+                      }
+                      placeholder="CNPJ, e-mail ou EVP"
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">Agência Itaú</label>
+                    <input
+                      type="text"
+                      value={editingCompany.itau.agency}
+                      onChange={(e) =>
+                        setEditingCompany({
+                          ...editingCompany,
+                          itau: { ...editingCompany.itau, agency: e.target.value },
+                        })
+                      }
+                      placeholder="0910"
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">Conta Corrente</label>
+                    <input
+                      type="text"
+                      value={editingCompany.itau.account}
+                      onChange={(e) =>
+                        setEditingCompany({
+                          ...editingCompany,
+                          itau: { ...editingCompany.itau, account: e.target.value },
+                        })
+                      }
+                      placeholder="12345-6"
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg font-mono"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* e.Rede Box */}
+              <div className="p-3.5 bg-orange-50/50 border border-orange-200/80 rounded-xl space-y-3">
+                <div className="font-bold text-orange-950 flex items-center gap-1.5">
+                  <CreditCard className="w-4 h-4 text-orange-600" />
+                  <span>Credenciais e.Rede (Cartão de Crédito/Débito por CNPJ)</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">PV (Filiação Rede)</label>
+                    <input
+                      type="text"
+                      value={editingCompany.rede.pv}
+                      onChange={(e) =>
+                        setEditingCompany({
+                          ...editingCompany,
+                          rede: { ...editingCompany.rede, pv: e.target.value },
+                        })
+                      }
+                      placeholder="12345678"
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">Token e.Rede</label>
+                    <input
+                      type="password"
+                      value={editingCompany.rede.token}
+                      onChange={(e) =>
+                        setEditingCompany({
+                          ...editingCompany,
+                          rede: { ...editingCompany.rede, token: e.target.value },
+                        })
+                      }
+                      placeholder="Opcional em Sandbox"
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">Nome na Fatura</label>
+                    <input
+                      type="text"
+                      maxLength={18}
+                      value={editingCompany.rede.softDescriptor || ''}
+                      onChange={(e) =>
+                        setEditingCompany({
+                          ...editingCompany,
+                          rede: { ...editingCompany.rede, softDescriptor: e.target.value },
+                        })
+                      }
+                      placeholder="ALPHA INFANTIL"
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg uppercase font-mono"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(editingCompany.isDefault)}
+                    onChange={(e) =>
+                      setEditingCompany({ ...editingCompany, isDefault: e.target.checked })
+                    }
+                    className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                  />
+                  <span className="font-semibold text-slate-700">
+                    Usar como Empresa Matriz Padrão (quando não houver regra de Série/Turma)
+                  </span>
+                </label>
+
+                <div className="flex items-center gap-2 ml-auto">
+                  <button
+                    type="button"
+                    onClick={() => setEditingCompany(null)}
+                    className="px-4 py-2 border border-slate-200 rounded-xl text-slate-700 font-semibold hover:bg-slate-50 cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-semibold flex items-center gap-1.5 cursor-pointer shadow-xs"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    <span>Salvar Empresa</span>
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

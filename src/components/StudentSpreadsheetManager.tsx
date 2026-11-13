@@ -16,6 +16,7 @@ import {
   getStatusHumanDescription,
 } from '../utils/studentValidation';
 import { isStudentNotStarted } from '../utils/reminderHelper';
+import { formatCnpj, resolveCompanyForStudent } from '../utils/companyResolver';
 import { EditStudentModal } from './EditStudentModal';
 import { EnrollmentReminderModal } from './EnrollmentReminderModal';
 import {
@@ -1325,6 +1326,14 @@ export function StudentSpreadsheetManager({
                       <div className="text-slate-400 text-[11px] mt-0.5 font-medium">
                         {student.turma} • {student.shift}
                       </div>
+                      {(() => {
+                        const { company: resolvedComp } = resolveCompanyForStudent(student, settings);
+                        return (
+                          <div className="text-[10px] text-slate-500 mt-1 font-mono tabular-nums truncate max-w-[190px]" title={`${resolvedComp.razaoSocial} • CNPJ ${formatCnpj(resolvedComp.cnpj)}`}>
+                            {resolvedComp.nomeFantasia} · {formatCnpj(resolvedComp.cnpj)}
+                          </div>
+                        );
+                      })()}
                     </td>
 
                     <td className="py-4 px-5">
@@ -1591,6 +1600,7 @@ Thiago Oliveira Dias,RA-2026-9902,3º Ano Ensino Médio,3º B,Matutino,Lucia Oli
           onSave={handleSaveEditedStudent}
           onOpenPortal={onOpenPortal}
           template={template}
+          settings={settings}
         />
       )}
 

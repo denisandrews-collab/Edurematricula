@@ -1,7 +1,14 @@
 import React, { useState } from 'react';
-import { ContractTemplate, Student } from '../types';
+import { ContractTemplate, IntegrationSettings, Student } from '../types';
 import { CONTRACT_PLACEHOLDERS, replaceContractPlaceholders } from '../utils/contractFormatter';
 import { DEFAULT_CONTRACT_TEMPLATE } from '../data/initialData';
+import { MultiCompanyManager } from './MultiCompanyManager';
+import {
+  formatCnpj,
+  getMatchSourceLabel,
+  resolveCompanyForStudent,
+  resolveContractTemplateForStudent,
+} from '../utils/companyResolver';
 import {
   FileText,
   Save,
@@ -24,6 +31,8 @@ interface Props {
   selectedStudent: Student;
   onSelectStudent: (student: Student) => void;
   initialSubTab?: 'editor' | 'preview' | 'school';
+  settings?: IntegrationSettings;
+  onUpdateSettings?: (settings: IntegrationSettings) => void;
 }
 
 export function ContractTemplateEditor({
@@ -33,6 +42,8 @@ export function ContractTemplateEditor({
   selectedStudent,
   onSelectStudent,
   initialSubTab = 'preview',
+  settings,
+  onUpdateSettings,
 }: Props) {
   const [activeTab, setActiveTab] = useState<'editor' | 'preview' | 'school'>(initialSubTab);
 
@@ -73,10 +84,16 @@ export function ContractTemplateEditor({
     setTimeout(() => setCopiedTag(null), 2000);
   };
 
-  const renderedContractForSelected = replaceContractPlaceholders(
-    formTemplate.content,
+  const { company: previewCompany, matchSource: previewMatchSource } = resolveCompanyForStudent(
     selectedStudent,
-    formTemplate
+    settings
+  );
+  const previewTemplate = resolveContractTemplateForStudent(formTemplate, selectedStudent, settings);
+
+  const renderedContractForSelected = replaceContractPlaceholders(
+    previewTemplate.content,
+    selectedStudent,
+    previewTemplate
   );
 
   return (
@@ -233,11 +250,16 @@ export function ContractTemplateEditor({
           {/* Right Column: Live Rendered Contract Sheet */}
           <div className="lg:col-span-3">
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-              <div className="bg-slate-900 text-white px-5 py-3.5 flex items-center justify-between text-xs">
-                <div className="flex items-center gap-2">
-                  <div className="w-2.5 h-2.5 rounded-full bg-emerald-400"></div>
+              <div className="bg-slate-900 text-white px-5 py-3.5 flex flex-wrap items-center justify-between gap-2 text-xs">
+                <div className="flex flex-wrap items-center gap-2">
                   <span className="font-medium">
                     Documento Gerado para: <strong className="text-white">{selectedStudent.name}</strong>
+                  </span>
+                  <span className="px-2 py-0.5 rounded-md bg-slate-800 border border-slate-700 text-[11px] text-slate-200 font-mono tabular-nums">
+                    {previewCompany.nomeFantasia} · CNPJ {formatCnpj(previewCompany.cnpj)}
+                  </span>
+                  <span className="text-[11px] text-slate-400">
+                    ({getMatchSourceLabel(previewMatchSource)})
                   </span>
                 </div>
                 <button
@@ -255,13 +277,13 @@ export function ContractTemplateEditor({
                   {/* School Header */}
                   <div className="text-center pb-6 border-b border-slate-200 space-y-1 font-sans">
                     <h2 className="text-lg font-bold text-slate-900 tracking-tight">
-                      {formTemplate.schoolName}
+                      {previewTemplate.schoolName}
                     </h2>
-                    <p className="text-xs text-slate-500">
-                      CNPJ: {formTemplate.schoolCnpj} • {formTemplate.schoolAddress} - {formTemplate.schoolCity}/{formTemplate.schoolState}
+                    <p className="text-xs text-slate-500 font-mono tabular-nums">
+                      CNPJ: {formatCnpj(previewTemplate.schoolCnpj)} • {previewTemplate.schoolAddress} - {previewTemplate.schoolCity}/{previewTemplate.schoolState}
                     </p>
                     <p className="text-xs text-slate-400">
-                      Tel: {formTemplate.schoolPhone} • {formTemplate.schoolEmail}
+                      Tel: {previewTemplate.schoolPhone} • {previewTemplate.schoolEmail}
                     </p>
                   </div>
 
@@ -348,21 +370,30 @@ export function ContractTemplateEditor({
 
       {/* School & Witnesses Info Tab */}
       {activeTab === 'school' && (
-        <div className="space-y-6 max-w-4xl">
-          {/* Contratada */}
-          <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-xs space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                <Building className="w-5 h-5 text-indigo-600" />
-                1. CONTRATADA (Instituição de Ensino - Sempre a Mesma)
-              </h3>
-              <span className="px-2.5 py-0.5 bg-indigo-50 text-indigo-700 text-[11px] font-bold rounded-full uppercase tracking-wider">
-                Fixo nos Contratos
-              </span>
-            </div>
-            <p className="text-xs text-slate-500">
-              Estas informações qualificam a escola e seu representante legal em todos os contratos gerados automaticamente.
-            </p>
+        <div className="space-y-6">
+          {settings && onUpdateSettings && (
+            <MultiCompanyManager
+              settings={settings}
+              onUpdateSettings={onUpdateSettings}
+              students={students}
+            />
+          )}
+
+          <div className="space-y-6 max-w-4xl">
+            {/* Contratada Padrão (Fallback) */}
+            <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-xs space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  <Building className="w-5 h-5 text-indigo-600" />
+                  1. CONTRATADA PADRÃO DO MODELO (Fallback Global)
+                </h3>
+                <span className="px-2.5 py-0.5 bg-indigo-50 text-indigo-700 text-[11px] font-bold rounded-full uppercase tracking-wider">
+                  Substituído pela Empresa da Série/Turma
+                </span>
+              </div>
+              <p className="text-xs text-slate-500">
+                Dados institucionais base quando não houver regra específica de CNPJ vinculada à Série/Turma do aluno. Quando houver empresa multiempresa vinculada acima, o contrato assume automaticamente a Razão Social, CNPJ e Representante da empresa cobradora.
+              </p>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
               <div className="sm:col-span-2">
@@ -567,6 +598,7 @@ export function ContractTemplateEditor({
                 </div>
               </div>
             </div>
+          </div>
           </div>
         </div>
       )}

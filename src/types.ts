@@ -100,6 +100,14 @@ export interface Student {
   lastReminderSentAt?: string;
   reminderCount?: number;
   customPortalPermissions?: PortalEditablePermissions;
+
+  // Multiempresa: Empresa vinculada / cobrada
+  companyId?: string;
+  billedCompanyId?: string;
+  billedCompanyName?: string;
+  billedCompanyCnpj?: string;
+  billedBankSummary?: string;
+
   historyLogs: StudentHistoryLog[];
 }
 
@@ -174,6 +182,51 @@ export interface ReminderEmailTemplate {
   lastUpdated?: string;
 }
 
+export interface CompanyBankConfig {
+  clientId?: string;
+  clientSecret?: string;
+  pixKey: string;
+  environment?: 'sandbox' | 'production';
+  agency: string;
+  account: string;
+  wallet: string;
+}
+
+export interface CompanyRedeConfig {
+  pv: string;
+  token: string;
+  softDescriptor?: string;
+  sandbox?: boolean;
+  enabled?: boolean;
+}
+
+export interface CompanyEntity {
+  id: string;
+  razaoSocial: string;
+  nomeFantasia: string;
+  cnpj: string;
+  isDefault?: boolean;
+  active: boolean;
+  address?: string;
+  city?: string;
+  state?: string;
+  representative?: string;
+  representativeCpf?: string;
+  representativeRole?: string;
+  phone?: string;
+  email?: string;
+  itau: CompanyBankConfig;
+  rede: CompanyRedeConfig;
+}
+
+export interface BillingCompanyRule {
+  id: string;
+  scope: 'serie' | 'turma';
+  targetValue: string;
+  companyId: string;
+  updatedAt?: string;
+}
+
 export interface IntegrationSettings {
   autentique: {
     apiKey: string;
@@ -202,6 +255,8 @@ export interface IntegrationSettings {
     softDescriptor?: string;
     pixDiscountPercent?: number;
   };
+  companies?: CompanyEntity[];
+  billingRules?: BillingCompanyRule[];
   portalPermissions?: PortalEditablePermissions;
   reminderTemplate?: ReminderEmailTemplate;
 }

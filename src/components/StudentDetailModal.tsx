@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { Student, ContractTemplate, PortalEditablePermissions } from '../types';
+import { Student, ContractTemplate, PortalEditablePermissions, IntegrationSettings } from '../types';
 import { formatCurrency, formatDateBr, formatCpf, formatPhone } from '../utils/contractFormatter';
 import { DEFAULT_PORTAL_PERMISSIONS } from '../data/initialData';
 import { EditStudentModal } from './EditStudentModal';
+import { formatCnpj, getMatchSourceLabel, resolveCompanyForStudent } from '../utils/companyResolver';
 import {
   User,
   GraduationCap,
@@ -23,6 +24,7 @@ import {
   Phone,
   Mail,
   UserCheck,
+  Building2,
 } from 'lucide-react';
 
 interface Props {
@@ -32,6 +34,7 @@ interface Props {
   onSendAutentique: (student: Student) => void;
   onUpdateStudent?: (student: Student) => void;
   template: ContractTemplate;
+  settings?: IntegrationSettings;
 }
 
 export function StudentDetailModal({
@@ -41,6 +44,7 @@ export function StudentDetailModal({
   onSendAutentique,
   onUpdateStudent,
   template,
+  settings,
 }: Props) {
   const [isEditing, setIsEditing] = useState(false);
 
@@ -174,6 +178,21 @@ export function StudentDetailModal({
               <span className="text-slate-500">Vencimento da Rematrícula:</span>
               <div className="text-slate-800 font-medium">{formatDateBr(student.dueDate)}</div>
             </div>
+            {(() => {
+              const { company: billedComp, matchSource } = resolveCompanyForStudent(student, settings);
+              return (
+                <div className="pt-2 border-t border-slate-200/80">
+                  <span className="text-slate-500 flex items-center gap-1">
+                    <Building2 className="w-3 h-3 text-indigo-600" />
+                    Empresa Cobradora (CNPJ):
+                  </span>
+                  <div className="font-semibold text-slate-900 mt-0.5">{billedComp.nomeFantasia}</div>
+                  <div className="text-[11px] font-mono text-slate-600 tabular-nums">
+                    {formatCnpj(billedComp.cnpj)} · {getMatchSourceLabel(matchSource)}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
 
           <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2">
@@ -397,6 +416,7 @@ export function StudentDetailModal({
             onSave={handleSaveEdited}
             onOpenPortal={onOpenPortal}
             template={template}
+            settings={settings}
           />
         )}
       </div>

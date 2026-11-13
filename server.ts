@@ -375,16 +375,46 @@ app.post('/api/autentique/sign-simulation/:documentId', (req, res) => {
   });
 });
 
-// Itaú API: Generate PIX
+// Helper: build PIX EMV string with routed company PIX key & merchant name
+function buildCompanyPixPayload(
+  amount: number,
+  pixKeyInput?: string,
+  merchantInput?: string
+): string {
+  const pixAmount = Number(amount || 0).toFixed(2);
+  const pixKey = (pixKeyInput || 'financeiro@colegiomodeloalpha.com.br').trim();
+  const cleanMerchant = (merchantInput || 'COLEGIO MODELO ALPHA')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9 ]/g, '')
+    .trim()
+    .slice(0, 25) || 'INSTITUICAO ENSINO';
+  const keyLen = String(pixKey.length).padStart(2, '0');
+  const merchInfo = `0014br.gov.bcb.pix01${keyLen}${pixKey}`;
+  const merchInfoLen = String(merchInfo.length).padStart(2, '0');
+  const amtLen = String(pixAmount.length).padStart(2, '0');
+  const nameLen = String(cleanMerchant.length).padStart(2, '0');
+  const crc = Math.random().toString(16).substring(2, 6).toUpperCase().padEnd(4, 'A');
+  return `00020126${merchInfoLen}${merchInfo}52040000530398654${amtLen}${pixAmount}5802BR59${nameLen}${cleanMerchant}6009SAO PAULO62070503***6304${crc}`;
+}
+
+// Itaú API: Generate PIX (Roteado por Empresa/CNPJ)
 app.post('/api/itau/pix/create', (req, res) => {
   try {
-    const { studentId, studentName, amount, responsibleName, responsibleCpf } = req.body;
+    const { studentId, amount, company } = req.body;
     const txId = 'ITAU' + Date.now().toString() + Math.random().toString(36).substring(2, 6).toUpperCase();
     const paymentId = 'pay_pix_' + Math.random().toString(36).substring(2, 10);
-    const pixAmount = Number(amount || 0).toFixed(2);
 
-    // Standard Brazilian EMV QR Code / PIX Payload format simulation
-    const pixCopyPaste = `00020126580014br.gov.bcb.pix0136colegio@educacao.com.br520400005303986540${pixAmount.length}${pixAmount}5802BR5925COLEGIO MODELO ALPHA SAO6009SAO PAULO62070503***6304${Math.random().toString(16).substring(2, 6).toUpperCase()}`;
+    const beneficiaryCompany = company?.razaoSocial || 'COLÉGIO MODELO ALPHA DE EDUCAÇÃO BÁSICA LTDA';
+    const beneficiaryCnpj = company?.cnpj || '12.345.678/0001-90';
+    const agency = company?.agency || '0910';
+    const account = company?.account || '12345-6';
+    const pixCopyPaste = buildCompanyPixPayload(
+      Number(amount || 0),
+      company?.pixKey,
+      company?.nomeFantasia || beneficiaryCompany
+    );
 
     const payment: InMemoryPayment = {
       id: paymentId,
@@ -410,19 +440,27 @@ app.post('/api/itau/pix/create', (req, res) => {
       pixCopyPaste: payment.pixCopyPaste,
       pixQrCode: payment.pixQrCode,
       expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-      bank: 'Itaú Unibanco S.A. (341)',
+      bank: `Itaú Unibanco S.A. (341 - Ag. ${agency} Cc ${account})`,
+      beneficiaryCompany,
+      beneficiaryCnpj,
+      bankAccount: `Ag. ${agency} · Cc ${account}`,
     });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// Itaú API: Generate Boleto Bancário
+// Itaú API: Generate Boleto Bancário (Roteado por Empresa/CNPJ)
 app.post('/api/itau/boleto/create', (req, res) => {
   try {
-    const { studentId, studentName, amount, dueDate, responsibleName, responsibleCpf } = req.body;
+    const { studentId, amount, dueDate, company } = req.body;
     const paymentId = 'pay_bol_' + Math.random().toString(36).substring(2, 10);
     const txId = 'BOL' + Date.now().toString();
+
+    const beneficiaryCompany = company?.razaoSocial || 'Colégio Modelo Alpha de Educação Básica Ltda';
+    const beneficiaryCnpj = company?.cnpj || '12.345.678/0001-90';
+    const agency = company?.agency || '0910';
+    const account = company?.account || '12345-6';
 
     // Standard Itaú formatted Linha Digitável (341-7 Banco Itaú)
     const p1 = '34191.' + Math.floor(10000 + Math.random() * 90000);
@@ -458,15 +496,18 @@ app.post('/api/itau/boleto/create', (req, res) => {
       linhaDigitavel,
       codigoBarras,
       dueDate: dueDate || new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-      beneficiary: 'Colégio Modelo Alpha - CNPJ 12.345.678/0001-90',
-      bank: 'Itaú Unibanco S.A. (341 - Agência 0910)',
+      beneficiary: `${beneficiaryCompany} - CNPJ ${beneficiaryCnpj}`,
+      bank: `Itaú Unibanco S.A. (341 - Agência ${agency} · Conta ${account})`,
+      beneficiaryCompany,
+      beneficiaryCnpj,
+      bankAccount: `Ag. ${agency} · Cc ${account}`,
     });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// Itaú API: Process Card Payment (Credit or Debit)
+// Itaú API: Process Card Payment (Credit or Debit - Roteado por Empresa/CNPJ)
 app.post('/api/itau/card/charge', (req, res) => {
   try {
     const {
@@ -474,14 +515,18 @@ app.post('/api/itau/card/charge', (req, res) => {
       amount,
       method,
       cardNumber,
-      cardHolder,
-      cardExpiry,
       installments,
+      company,
     } = req.body;
 
     const paymentId = 'pay_card_' + Math.random().toString(36).substring(2, 10);
     const txId = 'ITAU_GATEWAY_' + Date.now().toString();
     const last4 = (cardNumber || '4532').replace(/\s+/g, '').slice(-4);
+
+    const beneficiaryCompany = company?.razaoSocial || 'COLÉGIO MODELO ALPHA DE EDUCAÇÃO BÁSICA LTDA';
+    const beneficiaryCnpj = company?.cnpj || '12.345.678/0001-90';
+    const agency = company?.agency || '0910';
+    const account = company?.account || '12345-6';
 
     const payment: InMemoryPayment = {
       id: paymentId,
@@ -508,15 +553,18 @@ app.post('/api/itau/card/charge', (req, res) => {
       amount: payment.amount,
       cardLast4: last4,
       authorizationCode: 'AUTH_' + Math.floor(100000 + Math.random() * 900000),
-      acquirer: 'Itaú Rede Gateway',
-      message: 'Transação autorizada com sucesso pela adquirente Itaú.',
+      acquirer: `Itaú Rede Gateway (${company?.nomeFantasia || 'Matriz'})`,
+      message: `Transação autorizada com sucesso para ${beneficiaryCompany} (CNPJ ${beneficiaryCnpj}).`,
+      beneficiaryCompany,
+      beneficiaryCnpj,
+      bankAccount: `Ag. ${agency} · Cc ${account}`,
     });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// Rede API: Process Payment (Pix, Credit Card, Debit Card)
+// Rede API: Process Payment (Pix, Credit Card, Debit Card - Roteado por Empresa/CNPJ)
 app.post('/api/rede/process-payment', async (req, res) => {
   try {
     const {
@@ -524,28 +572,40 @@ app.post('/api/rede/process-payment', async (req, res) => {
       amount,
       transactionId,
       userId,
+      studentId,
       paymentMethod,
       customer,
       installments,
       customPv,
       customToken,
+      company,
     } = req.body;
 
-    const pv = customPv || process.env.REDE_PV;
-    const token = customToken || process.env.REDE_TOKEN;
+    const normalizedMethod = String(paymentMethod || 'pix').toLowerCase();
+    const pv = customPv || company?.redePv || process.env.REDE_PV;
+    const token = customToken || company?.redeToken || process.env.REDE_TOKEN;
     const isSandbox = process.env.REDE_SANDBOX !== 'false';
     const tid = transactionId || `txn_rede_${Date.now()}`;
     const numAmount = parseFloat(amount || '0');
 
-    console.log(`[REDE-API] Processando pagamento: Método=${paymentMethod}, Valor=R$ ${numAmount.toFixed(2)}, TID=${tid}`);
+    const beneficiaryCompany = company?.razaoSocial || customer?.businessName || 'COLÉGIO MODELO ALPHA DE EDUCAÇÃO BÁSICA LTDA';
+    const beneficiaryCnpj = company?.cnpj || customer?.cnpj || '12.345.678/0001-90';
+    const agency = company?.agency || '0910';
+    const account = company?.account || '12345-6';
+    const bankAccount = `Ag. ${agency} · Cc ${account}`;
 
-    if (paymentMethod === 'pix') {
-      const amtStr = numAmount.toFixed(2);
-      const pixCopyPaste = `00020126580014br.gov.bcb.pix0136colegio@educacao.com.br520400005303986540${amtStr.length}${amtStr}5802BR5925COLEGIO MODELO ALPHA SAO6009SAO PAULO62070503***6304${Math.random().toString(16).substring(2, 6).toUpperCase()}`;
+    console.log(`[REDE-API] Método=${normalizedMethod}, Valor=R$ ${numAmount.toFixed(2)}, CNPJ=${beneficiaryCnpj}, TID=${tid}`);
+
+    if (normalizedMethod === 'pix') {
+      const pixCopyPaste = buildCompanyPixPayload(
+        numAmount,
+        company?.pixKey,
+        company?.nomeFantasia || beneficiaryCompany
+      );
 
       const payment: InMemoryPayment = {
         id: tid,
-        studentId: userId || 'std_unknown',
+        studentId: userId || studentId || 'std_unknown',
         method: 'PIX',
         amount: numAmount,
         status: 'PENDING',
@@ -566,7 +626,11 @@ app.post('/api/rede/process-payment', async (req, res) => {
           qrCodeImage: payment.pixQrCode,
           expiresIn: 3600,
         },
-        message: 'Código Pix gerado com sucesso via Rede / Itaú.',
+        beneficiaryCompany,
+        beneficiaryCnpj,
+        bankAccount,
+        pixKeyUsed: company?.pixKey || 'financeiro@colegiomodeloalpha.com.br',
+        message: `Código Pix gerado para ${beneficiaryCompany} (CNPJ ${beneficiaryCnpj}).`,
       });
     }
 
@@ -584,9 +648,9 @@ app.post('/api/rede/process-payment', async (req, res) => {
         const basicAuth = Buffer.from(`${pv}:${token}`).toString('base64');
         const [expMonth, expYear] = (cardData?.expiry || '12/28').split('/');
 
-        const redePayload = {
+        const redePayload: Record<string, any> = {
           capture: true,
-          kind: paymentMethod === 'debit' ? 'debit' : 'credit',
+          kind: normalizedMethod === 'debit' ? 'debit' : 'credit',
           reference: tid,
           amount: Math.round(numAmount * 100),
           installments: Number(installments || 1),
@@ -596,6 +660,9 @@ app.post('/api/rede/process-payment', async (req, res) => {
           expirationYear: Number('20' + (expYear || '28')),
           securityCode: cardData?.cvv || '123',
         };
+        if (company?.redeSoftDescriptor) {
+          redePayload.softDescriptor = company.redeSoftDescriptor;
+        }
 
         const apiResponse = await fetch(baseUrl, {
           method: 'POST',
@@ -612,8 +679,8 @@ app.post('/api/rede/process-payment', async (req, res) => {
         if (apiResponse.ok && (redeData.returnCode === '00' || redeData.authorizationCode)) {
           const payment: InMemoryPayment = {
             id: tid,
-            studentId: userId || 'std_unknown',
-            method: paymentMethod === 'debit' ? 'DEBIT_CARD' : 'CREDIT_CARD',
+            studentId: userId || studentId || 'std_unknown',
+            method: normalizedMethod === 'debit' ? 'DEBIT_CARD' : 'CREDIT_CARD',
             amount: numAmount,
             status: 'PAID',
             paidAt: new Date().toISOString(),
@@ -632,6 +699,10 @@ app.post('/api/rede/process-payment', async (req, res) => {
             authorizationCode: redeData.authorizationCode,
             last4,
             nsu: redeData.nsu,
+            beneficiaryCompany,
+            beneficiaryCnpj,
+            bankAccount,
+            pvUsed: pv,
           });
         } else {
           return res.status(400).json({
@@ -649,8 +720,8 @@ app.post('/api/rede/process-payment', async (req, res) => {
     // High fidelity Sandbox / Simulator response
     const payment: InMemoryPayment = {
       id: tid,
-      studentId: userId || 'std_unknown',
-      method: paymentMethod === 'debit' ? 'DEBIT_CARD' : 'CREDIT_CARD',
+      studentId: userId || studentId || 'std_unknown',
+      method: normalizedMethod === 'debit' ? 'DEBIT_CARD' : 'CREDIT_CARD',
       amount: numAmount,
       status: 'PAID',
       paidAt: new Date().toISOString(),
@@ -670,8 +741,12 @@ app.post('/api/rede/process-payment', async (req, res) => {
       amount: numAmount,
       cardLast4: last4,
       authorizationCode: 'AUTH_REDE_' + Math.floor(100000 + Math.random() * 900000),
-      acquirer: 'Rede Itaú Adquirência',
-      message: 'Transação autorizada com sucesso pelo gateway Rede.',
+      acquirer: `Rede Itaú Adquirência (${company?.nomeFantasia || 'Matriz'})`,
+      beneficiaryCompany,
+      beneficiaryCnpj,
+      bankAccount,
+      pvUsed: pv || 'SANDBOX',
+      message: `Transação autorizada para ${beneficiaryCompany} (CNPJ ${beneficiaryCnpj}).`,
     });
   } catch (error: any) {
     console.error('[REDE-API] Erro interno:', error);

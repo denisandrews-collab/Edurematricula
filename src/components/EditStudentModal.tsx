@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Student, ContractTemplate, StudentStatus, PortalEditablePermissions } from '../types';
+import { Student, ContractTemplate, StudentStatus, PortalEditablePermissions, IntegrationSettings } from '../types';
 import { formatCurrency } from '../utils/contractFormatter';
 import { DEFAULT_PORTAL_PERMISSIONS } from '../data/initialData';
+import { formatCnpj, getRegisteredCompanies, resolveCompanyForStudent } from '../utils/companyResolver';
 import {
   Edit3,
   User,
@@ -21,6 +22,7 @@ import {
   Phone,
   Mail,
   UserCheck,
+  Building2,
 } from 'lucide-react';
 
 interface Props {
@@ -30,6 +32,7 @@ interface Props {
   onSave: (updatedStudent: Student, shouldResendAutentique?: boolean) => void;
   onOpenPortal?: (student: Student) => void;
   template: ContractTemplate;
+  settings?: IntegrationSettings;
 }
 
 export function EditStudentModal({
@@ -39,6 +42,7 @@ export function EditStudentModal({
   onSave,
   onOpenPortal,
   template,
+  settings,
 }: Props) {
   const [formData, setFormData] = useState<Student>({ ...student });
   const [hasSecondResponsible, setHasSecondResponsible] = useState<boolean>(
@@ -519,6 +523,38 @@ export function EditStudentModal({
                   className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg"
                   placeholder="Fim da Campanha"
                 />
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="block font-semibold text-slate-700 mb-1 flex items-center gap-1.5">
+                  <Building2 className="w-3.5 h-3.5 text-indigo-600" />
+                  Empresa / CNPJ Recebedor (Opcional - Override Individual)
+                </label>
+                {(() => {
+                  const companies = getRegisteredCompanies(settings);
+                  const autoResolved = resolveCompanyForStudent(
+                    { ...formData, companyId: undefined },
+                    settings
+                  );
+                  return (
+                    <select
+                      value={formData.companyId || ''}
+                      onChange={(e) =>
+                        setFormData({ ...formData, companyId: e.target.value || undefined })
+                      }
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg font-medium text-slate-800"
+                    >
+                      <option value="">
+                        Automático pela Regra Série/Turma ({autoResolved.company.nomeFantasia} · {formatCnpj(autoResolved.company.cnpj)})
+                      </option>
+                      {companies.map((comp) => (
+                        <option key={comp.id} value={comp.id}>
+                          Forçar CNPJ: {comp.nomeFantasia} — {formatCnpj(comp.cnpj)}
+                        </option>
+                      ))}
+                    </select>
+                  );
+                })()}
               </div>
             </div>
           </div>

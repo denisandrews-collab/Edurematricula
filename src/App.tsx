@@ -521,6 +521,8 @@ export default function App() {
                     selectedStudent={selectedStudent}
                     onSelectStudent={setSelectedStudent}
                     initialSubTab={contractSubTab}
+                    settings={settings}
+                    onUpdateSettings={setSettings}
                   />
                 )}
 
@@ -540,11 +542,17 @@ export default function App() {
                     onUpdateStudents={setStudents}
                     onOpenPortal={handleOpenPortal}
                     settings={settings}
+                    onUpdateSettings={setSettings}
+                    onOpenCompaniesConfig={() => handleSelectTab('settings')}
                   />
                 )}
 
                 {currentTab === 'settings' && (
-                  <SettingsHub settings={settings} onUpdateSettings={setSettings} />
+                  <SettingsHub
+                    settings={settings}
+                    onUpdateSettings={setSettings}
+                    students={students}
+                  />
                 )}
 
                 {currentTab === 'portal' && (
@@ -573,6 +581,7 @@ export default function App() {
               onSendAutentique={handleSendAutentique}
               onUpdateStudent={handleUpdateStudent}
               template={contractTemplate}
+              settings={settings}
             />
           )}
         </Suspense>

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { IntegrationSettings, InstallmentTier, ProposalCampaignSettings, PortalEditablePermissions } from '../types';
+import { IntegrationSettings, InstallmentTier, ProposalCampaignSettings, PortalEditablePermissions, Student } from '../types';
 import { InstallmentPlanManager } from './InstallmentPlanManager';
+import { MultiCompanyManager } from './MultiCompanyManager';
 import { DEFAULT_INSTALLMENT_TIERS, DEFAULT_PROPOSAL_CAMPAIGN } from '../utils/installmentHelper';
 import { DEFAULT_PORTAL_PERMISSIONS } from '../data/initialData';
 import { DEFAULT_REMINDER_TEMPLATE, REMINDER_PLACEHOLDERS } from '../utils/reminderHelper';
@@ -31,9 +32,10 @@ import {
 interface Props {
   settings: IntegrationSettings;
   onUpdateSettings: (settings: IntegrationSettings) => void;
+  students?: Student[];
 }
 
-export function SettingsHub({ settings, onUpdateSettings }: Props) {
+export function SettingsHub({ settings, onUpdateSettings, students = [] }: Props) {
   const [formSettings, setFormSettings] = useState<IntegrationSettings>(settings);
   const [testResultAutentique, setTestResultAutentique] = useState<string | null>(null);
   const [testResultItau, setTestResultItau] = useState<string | null>(null);
@@ -148,6 +150,16 @@ export function SettingsHub({ settings, onUpdateSettings }: Props) {
           <span>Configurações salvas e aplicadas com sucesso!</span>
         </div>
       )}
+
+      {/* Cadastro Multiempresa & Vinculação por Série/Turma */}
+      <MultiCompanyManager
+        settings={formSettings}
+        students={students}
+        onUpdateSettings={(updated) => {
+          setFormSettings(updated);
+          onUpdateSettings(updated);
+        }}
+      />
 
       {/* Autentique Settings Card */}
       <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-xs space-y-4">
