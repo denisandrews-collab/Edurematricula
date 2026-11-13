@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Student, ContractTemplate } from '../types';
+import { Student, ContractTemplate, PortalEditablePermissions } from '../types';
 import { formatCurrency, formatDateBr, formatCpf, formatPhone } from '../utils/contractFormatter';
+import { DEFAULT_PORTAL_PERMISSIONS } from '../data/initialData';
 import { EditStudentModal } from './EditStudentModal';
 import {
   User,
@@ -14,6 +15,14 @@ import {
   ShieldCheck,
   Send,
   Edit3,
+  Check,
+  Shield,
+  Lock,
+  Unlock,
+  Home,
+  Phone,
+  Mail,
+  UserCheck,
 } from 'lucide-react';
 
 interface Props {
@@ -35,13 +44,16 @@ export function StudentDetailModal({
 }: Props) {
   const [isEditing, setIsEditing] = useState(false);
 
-  const isSigned =
+  const isPaid = student.status === 'pago' || student.status === 'matricula_confirmada';
+
+  const hasSecondResp = Boolean(student.responsible2Name && student.responsible2Name.trim().length > 0);
+  const isSigner1Ok = student.autentiqueSigner1Status === 'ASSINADO' || isPaid;
+  const isSigner2Ok = hasSecondResp ? (student.autentiqueSigner2Status === 'ASSINADO' || isPaid) : true;
+  const isFullySigned = (hasSecondResp ? (isSigner1Ok && isSigner2Ok) : isSigner1Ok) ||
     student.status === 'assinado' ||
     student.status === 'pagamento_pendente' ||
-    student.status === 'pago' ||
-    student.status === 'matricula_confirmada';
-
-  const isPaid = student.status === 'pago' || student.status === 'matricula_confirmada';
+    isPaid;
+  const isPartiallySigned = hasSecondResp && !isFullySigned && (isSigner1Ok || student.autentiqueSigner2Status === 'ASSINADO');
 
   const handleSaveEdited = (updatedStudent: Student, shouldResendAutentique?: boolean) => {
     if (onUpdateStudent) {
@@ -51,6 +63,32 @@ export function StudentDetailModal({
       onSendAutentique(updatedStudent);
     }
     setIsEditing(false);
+  };
+
+  const currentPermissions = student.customPortalPermissions || DEFAULT_PORTAL_PERMISSIONS;
+
+  const handleTogglePermission = (key: keyof PortalEditablePermissions) => {
+    if (!onUpdateStudent) return;
+    const base = student.customPortalPermissions
+      ? { ...student.customPortalPermissions }
+      : { ...DEFAULT_PORTAL_PERMISSIONS };
+    const updatedPerms: PortalEditablePermissions = {
+      ...base,
+      [key]: !base[key],
+    };
+    const updated: Student = {
+      ...student,
+      customPortalPermissions: updatedPerms,
+      historyLogs: [
+        ...student.historyLogs,
+        {
+          timestamp: new Date().toISOString(),
+          action: 'Permissões de Edição do Portal Alteradas',
+          details: `Permissão para "${key}" alterada para ${updatedPerms[key] ? 'Liberado' : 'Bloqueado'} pela secretaria.`,
+        },
+      ],
+    };
+    onUpdateStudent(updated);
   };
 
   return (
@@ -88,15 +126,20 @@ export function StudentDetailModal({
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
                 Rematrícula {template.academicYear} Confirmada!
               </span>
-            ) : isSigned ? (
+            ) : isFullySigned ? (
               <span className="font-bold text-indigo-800 bg-indigo-100/80 px-2.5 py-0.5 rounded-full flex items-center gap-1 border border-indigo-200">
                 <CreditCard className="w-3.5 h-3.5 text-indigo-600" />
-                Contrato Assinado • Aguardando Pagamento Itaú
+                {hasSecondResp ? 'Contrato Assinado por Ambos (2 de 2) • Aguardando Pagamento' : 'Contrato Assinado • Aguardando Pagamento Itaú'}
+              </span>
+            ) : isPartiallySigned ? (
+              <span className="font-bold text-amber-800 bg-amber-100/80 px-2.5 py-0.5 rounded-full flex items-center gap-1 border border-amber-200">
+                <Clock className="w-3.5 h-3.5 text-amber-600" />
+                1 de 2 Assinados • Aguardando {isSigner1Ok ? student.responsible2Name : student.responsibleName}
               </span>
             ) : student.status === 'enviado_autentique' ? (
               <span className="font-bold text-amber-800 bg-amber-100/80 px-2.5 py-0.5 rounded-full flex items-center gap-1 border border-amber-200">
                 <ShieldCheck className="w-3.5 h-3.5 text-amber-600" />
-                Aguardando Assinatura via Autentique
+                Aguardando Assinatura via Autentique {hasSecondResp ? '(Ambos os Responsáveis)' : ''}
               </span>
             ) : (
               <span className="font-bold text-slate-700 bg-slate-200 px-2.5 py-0.5 rounded-full flex items-center gap-1">
@@ -134,10 +177,21 @@ export function StudentDetailModal({
           </div>
 
           <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2">
-            <h4 className="font-bold text-slate-800 flex items-center gap-1.5">
-              <User className="w-4 h-4 text-indigo-600" />
-              1º Contratante (Responsável 1)
-            </h4>
+            <div className="flex items-center justify-between">
+              <h4 className="font-bold text-slate-800 flex items-center gap-1.5">
+                <User className="w-4 h-4 text-indigo-600" />
+                1º Contratante (Responsável 1)
+              </h4>
+              {isSigner1Ok ? (
+                <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1 border border-emerald-300">
+                  <Check className="w-2.5 h-2.5" /> Assinado
+                </span>
+              ) : (
+                <span className="bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded-md border border-amber-300">
+                  Pendente
+                </span>
+              )}
+            </div>
             <div>
               <span className="text-slate-500">Nome:</span>
               <div className="font-semibold text-slate-800">{student.responsibleName}</div>
@@ -160,10 +214,21 @@ export function StudentDetailModal({
 
           {student.responsible2Name && (
             <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2 sm:col-span-2">
-              <h4 className="font-bold text-slate-800 flex items-center gap-1.5">
-                <User className="w-4 h-4 text-indigo-600" />
-                2º Contratante (Responsável 2 - Solidário)
-              </h4>
+              <div className="flex items-center justify-between">
+                <h4 className="font-bold text-slate-800 flex items-center gap-1.5">
+                  <User className="w-4 h-4 text-indigo-600" />
+                  2º Contratante (Responsável 2 - Solidário)
+                </h4>
+                {isSigner2Ok ? (
+                  <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1 border border-emerald-300">
+                    <Check className="w-2.5 h-2.5" /> Assinado
+                  </span>
+                ) : (
+                  <span className="bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded-md border border-amber-300">
+                    Pendente
+                  </span>
+                )}
+              </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <span className="text-slate-500">Nome:</span>
@@ -180,6 +245,85 @@ export function StudentDetailModal({
               </div>
             </div>
           )}
+        </div>
+
+        {/* Portal Data Access Control & Checkboxes */}
+        <div className="bg-indigo-50/50 p-4 rounded-xl border border-indigo-200/80 space-y-2.5 text-xs">
+          <div className="flex items-center justify-between">
+            <h4 className="font-bold text-slate-800 flex items-center gap-1.5 uppercase tracking-wider text-[11px]">
+              <Shield className="w-4 h-4 text-indigo-600" />
+              Controle de Acesso: O que o Pai Pode Editar no Portal
+            </h4>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800">
+              {student.customPortalPermissions ? 'Personalizado para este Aluno' : 'Padrão da Escola'}
+            </span>
+          </div>
+
+          <p className="text-[11px] text-slate-600">
+            Selecione via checkbox quais campos o responsável tem permissão para alterar ao clicar em <em>"Corrigir / Atualizar Meus Dados"</em> no portal:
+          </p>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+            <label className={`p-2.5 rounded-lg border flex items-center justify-between gap-1.5 cursor-pointer transition ${
+              currentPermissions.allowAddress ? 'bg-emerald-50 border-emerald-300 text-emerald-950 font-bold' : 'bg-white border-slate-200 text-slate-500 opacity-70'
+            }`}>
+              <div className="flex items-center gap-1.5">
+                <Home className="w-3.5 h-3.5" />
+                <span className="text-xs">Endereço</span>
+              </div>
+              <input
+                type="checkbox"
+                checked={currentPermissions.allowAddress}
+                onChange={() => handleTogglePermission('allowAddress')}
+                className="w-3.5 h-3.5 text-indigo-600 rounded focus:ring-indigo-500 cursor-pointer"
+              />
+            </label>
+
+            <label className={`p-2.5 rounded-lg border flex items-center justify-between gap-1.5 cursor-pointer transition ${
+              currentPermissions.allowEmail ? 'bg-emerald-50 border-emerald-300 text-emerald-950 font-bold' : 'bg-white border-slate-200 text-slate-500 opacity-70'
+            }`}>
+              <div className="flex items-center gap-1.5">
+                <Mail className="w-3.5 h-3.5" />
+                <span className="text-xs">E-mails</span>
+              </div>
+              <input
+                type="checkbox"
+                checked={currentPermissions.allowEmail}
+                onChange={() => handleTogglePermission('allowEmail')}
+                className="w-3.5 h-3.5 text-indigo-600 rounded focus:ring-indigo-500 cursor-pointer"
+              />
+            </label>
+
+            <label className={`p-2.5 rounded-lg border flex items-center justify-between gap-1.5 cursor-pointer transition ${
+              currentPermissions.allowPhone ? 'bg-emerald-50 border-emerald-300 text-emerald-950 font-bold' : 'bg-white border-slate-200 text-slate-500 opacity-70'
+            }`}>
+              <div className="flex items-center gap-1.5">
+                <Phone className="w-3.5 h-3.5" />
+                <span className="text-xs">Telefones</span>
+              </div>
+              <input
+                type="checkbox"
+                checked={currentPermissions.allowPhone}
+                onChange={() => handleTogglePermission('allowPhone')}
+                className="w-3.5 h-3.5 text-indigo-600 rounded focus:ring-indigo-500 cursor-pointer"
+              />
+            </label>
+
+            <label className={`p-2.5 rounded-lg border flex items-center justify-between gap-1.5 cursor-pointer transition ${
+              currentPermissions.allowSecondResponsible ? 'bg-emerald-50 border-emerald-300 text-emerald-950 font-bold' : 'bg-white border-slate-200 text-slate-500 opacity-70'
+            }`}>
+              <div className="flex items-center gap-1.5">
+                <UserCheck className="w-3.5 h-3.5" />
+                <span className="text-xs">2º Responsável</span>
+              </div>
+              <input
+                type="checkbox"
+                checked={currentPermissions.allowSecondResponsible}
+                onChange={() => handleTogglePermission('allowSecondResponsible')}
+                className="w-3.5 h-3.5 text-indigo-600 rounded focus:ring-indigo-500 cursor-pointer"
+              />
+            </label>
+          </div>
         </div>
 
         {/* Audit Trail / History Logs */}

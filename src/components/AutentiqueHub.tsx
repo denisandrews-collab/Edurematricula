@@ -63,19 +63,29 @@ export function AutentiqueHub({
         if (s.id === student.id) {
           const nextStatus: Student['status'] =
             s.status === 'pago' || s.status === 'matricula_confirmada' ? s.status : 'assinado';
+          const nowIso = res.signedAt || new Date().toISOString();
+          const ip = res.certificate?.ip || '177.18.241.109';
+          const hash = res.certificate?.authHash || 'sha256_mock_' + Math.random().toString(36).substring(2);
+          const has2nd = Boolean(s.responsible2Name && s.responsible2Name.trim().length > 0);
           return {
             ...s,
             status: nextStatus,
             autentiqueStatus: 'ASSINADO' as const,
-            autentiqueSignedAt: res.signedAt || new Date().toISOString(),
-            autentiqueSignerIp: res.certificate?.ip || '177.18.241.109',
-            autentiqueCertHash: res.certificate?.authHash || 'sha256_mock_' + Math.random().toString(36).substring(2),
+            autentiqueSignedAt: nowIso,
+            autentiqueSignerIp: ip,
+            autentiqueCertHash: hash,
+            autentiqueSigner1Status: 'ASSINADO' as const,
+            autentiqueSigner1SignedAt: s.autentiqueSigner1SignedAt || nowIso,
+            autentiqueSigner1Ip: s.autentiqueSigner1Ip || ip,
+            autentiqueSigner2Status: has2nd ? ('ASSINADO' as const) : undefined,
+            autentiqueSigner2SignedAt: has2nd ? (s.autentiqueSigner2SignedAt || nowIso) : undefined,
+            autentiqueSigner2Ip: has2nd ? (s.autentiqueSigner2Ip || ip) : undefined,
             historyLogs: [
               ...s.historyLogs,
               {
-                timestamp: new Date().toISOString(),
+                timestamp: nowIso,
                 action: 'Assinatura Eletrônica Autentique Confirmada',
-                details: `Assinado por ${student.responsibleName} via API Autentique. Liberado para pagamento Itaú.`,
+                details: `Assinaturas homologadas com sucesso (${has2nd ? 'Ambos os Responsáveis: 2 de 2' : 'Responsável Principal'}). Fase de pagamento Itaú desbloqueada.`,
               },
             ],
           };
@@ -145,9 +155,9 @@ export function AutentiqueHub({
         </div>
 
         <div className="flex items-center gap-3">
-          <div className="bg-emerald-50 px-3.5 py-1.5 rounded-xl border border-emerald-200 text-xs font-semibold text-emerald-800 flex items-center gap-1.5 shadow-xs">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-            <span>API Autentique v2 GraphQL Conectada</span>
+          <div className="bg-emerald-50 px-3.5 py-1.5 rounded-xl border border-emerald-200 text-xs font-semibold text-emerald-800 flex items-center gap-1.5">
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+            <span>API Autentique v2 GraphQL</span>
           </div>
         </div>
       </div>
@@ -167,7 +177,7 @@ export function AutentiqueHub({
         <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs flex items-center justify-between">
           <div>
             <span className="text-xs text-slate-500 font-semibold uppercase tracking-wider">Contratos Disparados</span>
-            <div className="text-2xl font-bold text-slate-900 mt-1">{autentiqueStudents.length}</div>
+            <div className="text-2xl font-bold text-slate-900 mt-1 tabular-nums">{autentiqueStudents.length}</div>
           </div>
           <div className="w-12 h-12 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center border border-indigo-100">
             <Send className="w-5 h-5" />
@@ -177,7 +187,7 @@ export function AutentiqueHub({
         <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs flex items-center justify-between">
           <div>
             <span className="text-xs text-amber-600 font-semibold uppercase tracking-wider">Aguardando Assinatura</span>
-            <div className="text-2xl font-bold text-amber-700 mt-1">{pendingCount}</div>
+            <div className="text-2xl font-bold text-amber-700 mt-1 tabular-nums">{pendingCount}</div>
           </div>
           <div className="w-12 h-12 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center border border-amber-100">
             <Clock className="w-5 h-5" />
@@ -187,7 +197,7 @@ export function AutentiqueHub({
         <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs flex items-center justify-between">
           <div>
             <span className="text-xs text-emerald-600 font-semibold uppercase tracking-wider">Assinados Digitalmente</span>
-            <div className="text-2xl font-bold text-emerald-700 mt-1">{signedCount}</div>
+            <div className="text-2xl font-bold text-emerald-700 mt-1 tabular-nums">{signedCount}</div>
           </div>
           <div className="w-12 h-12 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-100">
             <CheckCircle2 className="w-5 h-5" />
@@ -232,11 +242,16 @@ export function AutentiqueHub({
                     s.responsibleName.toLowerCase().includes(searchTerm.toLowerCase())
                 )
                 .map((student) => {
-                  const isSigned =
+                  const hasSecondResp = Boolean(student.responsible2Name && student.responsible2Name.trim().length > 0);
+                  const isSigner1Ok = student.autentiqueSigner1Status === 'ASSINADO';
+                  const isSigner2Ok = hasSecondResp ? student.autentiqueSigner2Status === 'ASSINADO' : true;
+                  const isFullySigned =
+                    (hasSecondResp ? (isSigner1Ok && isSigner2Ok) : isSigner1Ok) ||
                     student.status === 'assinado' ||
                     student.status === 'pagamento_pendente' ||
                     student.status === 'pago' ||
                     student.status === 'matricula_confirmada';
+                  const isPartiallySigned = hasSecondResp && !isFullySigned && (isSigner1Ok || student.autentiqueSigner2Status === 'ASSINADO');
 
                   return (
                     <tr key={student.id} className="hover:bg-slate-50/80 transition">
@@ -250,6 +265,12 @@ export function AutentiqueHub({
                         <div className="text-slate-400 text-[11px]">
                           CPF: {formatCpf(student.responsibleCpf)} • {student.responsibleEmail}
                         </div>
+                        {hasSecondResp && (
+                          <div className="text-slate-500 text-[11px] mt-0.5 pt-0.5 border-t border-slate-100 flex items-center gap-1">
+                            <span className="font-semibold text-slate-700">2º Resp:</span>
+                            <span>{student.responsible2Name}</span>
+                          </div>
+                        )}
                       </td>
 
                       <td className="py-3.5 px-4 font-mono text-[11px] text-slate-600">
@@ -257,29 +278,39 @@ export function AutentiqueHub({
                       </td>
 
                       <td className="py-3.5 px-4">
-                        {isSigned ? (
+                        {isFullySigned ? (
                           <div className="flex flex-col">
                             <span className="inline-flex items-center text-xs font-bold text-emerald-700">
                               <CheckCircle2 className="w-3.5 h-3.5 mr-1 text-emerald-600" />
-                              Assinado com Certificado
+                              {hasSecondResp ? 'Assinado (2 de 2)' : 'Assinado com Certificado'}
                             </span>
                             <span className="text-[10px] text-slate-400">
                               {student.autentiqueSignedAt
                                 ? new Date(student.autentiqueSignedAt).toLocaleString('pt-BR')
-                                : 'Assinado'}
+                                : 'Assinado digitalmente'}
+                            </span>
+                          </div>
+                        ) : isPartiallySigned ? (
+                          <div className="flex flex-col">
+                            <span className="inline-flex items-center text-xs font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-lg border border-amber-200">
+                              <Clock className="w-3 h-3 mr-1 text-amber-600" />
+                              1 de 2 Assinados
+                            </span>
+                            <span className="text-[10px] text-amber-800 mt-0.5">
+                              {isSigner1Ok ? `Falta: ${student.responsible2Name}` : `Falta: ${student.responsibleName}`}
                             </span>
                           </div>
                         ) : (
                           <span className="inline-flex items-center text-xs font-semibold text-amber-700 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200">
-                            <Clock className="w-3 h-3 mr-1 text-amber-600 animate-pulse" />
-                            Pendente de Assinatura
+                            <Clock className="w-3 h-3 mr-1 text-amber-600" />
+                            {hasSecondResp ? 'Aguardando 2 Assinaturas' : 'Pendente de Assinatura'}
                           </span>
                         )}
                       </td>
 
                       <td className="py-3.5 px-4 text-right">
                         <div className="flex items-center justify-end gap-1.5">
-                          {isSigned ? (
+                          {isFullySigned ? (
                             <button
                               onClick={() => setSelectedDocForCert(student)}
                               className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1 transition cursor-pointer"

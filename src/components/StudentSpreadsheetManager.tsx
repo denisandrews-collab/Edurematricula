@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
-import * as XLSX from 'xlsx';
-import { Student, StudentStatus, ContractTemplate } from '../types';
+import React, { useState, useRef } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
+import { Student, StudentStatus, ContractTemplate, IntegrationSettings, ReminderEmailTemplate } from '../types';
 import {
   formatCurrency,
   formatDateBr,
@@ -15,7 +15,9 @@ import {
   filterNewEnrollmentsBatch,
   getStatusHumanDescription,
 } from '../utils/studentValidation';
+import { isStudentNotStarted } from '../utils/reminderHelper';
 import { EditStudentModal } from './EditStudentModal';
+import { EnrollmentReminderModal } from './EnrollmentReminderModal';
 import {
   Upload,
   Download,
@@ -34,6 +36,8 @@ import {
   AlertCircle,
   Sparkles,
   FileSpreadsheet,
+  BellRing,
+  Mail,
 } from 'lucide-react';
 
 interface Props {
@@ -44,7 +48,9 @@ interface Props {
   onSendAutentique: (student: Student) => Promise<void>;
   onBatchSendAutentique: (students: Student[]) => Promise<void>;
   template: ContractTemplate;
-  initialAction?: 'import' | 'new_student' | 'batch_send' | null;
+  settings?: IntegrationSettings;
+  onUpdateReminderTemplate?: (template: ReminderEmailTemplate) => void;
+  initialAction?: 'import' | 'new_student' | 'batch_send' | 'reminder' | 'export_excel' | 'focus_search' | null;
   onClearInitialAction?: () => void;
 }
 
@@ -56,6 +62,8 @@ export function StudentSpreadsheetManager({
   onSendAutentique,
   onBatchSendAutentique,
   template,
+  settings,
+  onUpdateReminderTemplate,
   initialAction,
   onClearInitialAction,
 }: Props) {
@@ -67,6 +75,17 @@ export function StudentSpreadsheetManager({
   const [rawCsvText, setRawCsvText] = useState('');
   const [isSendingBatch, setIsSendingBatch] = useState(false);
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
+  const [isReminderModalOpen, setIsReminderModalOpen] = useState(false);
+  const [reminderTargetIds, setReminderTargetIds] = useState<string[] | undefined>(undefined);
+  const [studentToDelete, setStudentToDelete] = useState<{ id: string; name: string } | null>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  const notStartedCount = students.filter(isStudentNotStarted).length;
+
+  const openReminderModal = (targetIds?: string[]) => {
+    setReminderTargetIds(targetIds);
+    setIsReminderModalOpen(true);
+  };
 
   React.useEffect(() => {
     if (initialAction === 'import') {
@@ -77,6 +96,15 @@ export function StudentSpreadsheetManager({
       onClearInitialAction?.();
     } else if (initialAction === 'batch_send') {
       handleBatchSend();
+      onClearInitialAction?.();
+    } else if (initialAction === 'reminder') {
+      openReminderModal(undefined);
+      onClearInitialAction?.();
+    } else if (initialAction === 'export_excel') {
+      handleExportExcel();
+      onClearInitialAction?.();
+    } else if (initialAction === 'focus_search') {
+      setTimeout(() => searchInputRef.current?.focus(), 40);
       onClearInitialAction?.();
     }
   }, [initialAction]);
@@ -149,9 +177,9 @@ export function StudentSpreadsheetManager({
     setTimeout(() => setFeedbackMessage(null), 4000);
   };
 
-  const handleExportExcel = () => {
+  const handleExportExcel = async () => {
     try {
-      exportStudentsToExcel(students, `rematriculas_colegio_2026_${new Date().toISOString().split('T')[0]}.xlsx`);
+      await exportStudentsToExcel(students, `rematriculas_colegio_2026_${new Date().toISOString().split('T')[0]}.xlsx`);
       showLocalFeedback('Planilha Excel (.xlsx) exportada com sucesso em colunas com 1º e 2º Responsáveis!', 'success');
     } catch (e: any) {
       showLocalFeedback('Erro ao exportar arquivo Excel: ' + e.message, 'error');
@@ -175,7 +203,8 @@ export function StudentSpreadsheetManager({
     }
   };
 
-  const handleDownloadExcelTemplate = () => {
+  const handleDownloadExcelTemplate = async () => {
+    const XLSX = await import('xlsx');
     const templateData = [
       {
         'ID_ALUNO': 'COL-001',
@@ -257,8 +286,9 @@ export function StudentSpreadsheetManager({
 
   const handleProcessExcelFile = (file: File) => {
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
       try {
+        const XLSX = await import('xlsx');
         const data = new Uint8Array(e.target?.result as ArrayBuffer);
         const workbook = XLSX.read(data, { type: 'array' });
         const firstSheetName = workbook.SheetNames[0];
@@ -457,11 +487,15 @@ export function StudentSpreadsheetManager({
   };
 
   const handleDeleteStudent = (studentId: string, studentName: string) => {
-    if (window.confirm(`Tem certeza que deseja remover o aluno ${studentName} da lista de rematrículas?`)) {
-      const remaining = students.filter((s) => s.id !== studentId);
-      onUpdateStudents(remaining);
-      showLocalFeedback(`Aluno ${studentName} removido da planilha.`, 'info');
-    }
+    setStudentToDelete({ id: studentId, name: studentName });
+  };
+
+  const confirmDeleteStudent = () => {
+    if (!studentToDelete) return;
+    const remaining = students.filter((s) => s.id !== studentToDelete.id);
+    onUpdateStudents(remaining);
+    showLocalFeedback(`Aluno ${studentToDelete.name} removido da planilha.`, 'info');
+    setStudentToDelete(null);
   };
 
   const handleImportCsv = () => {
@@ -651,7 +685,7 @@ export function StudentSpreadsheetManager({
       case 'enviado_autentique':
         return (
           <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200/80">
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse mr-1.5"></span>
+            <Clock className="w-3 h-3 mr-1.5 text-amber-600" />
             Aguardando Assinatura
           </span>
         );
@@ -763,6 +797,21 @@ export function StudentSpreadsheetManager({
             </button>
 
             <button
+              id="btn-open-reminder-modal"
+              onClick={() => openReminderModal(undefined)}
+              title="Disparar e-mail de lembrete com link direto do portal para pais que ainda não iniciaram"
+              className="px-3.5 py-2.5 bg-amber-500 hover:bg-amber-600 active:scale-95 text-slate-950 rounded-xl text-xs font-extrabold flex items-center space-x-1.5 transition shadow-sm cursor-pointer select-none"
+            >
+              <BellRing className="w-3.5 h-3.5" />
+              <span>Lembrete de Rematrícula</span>
+              {notStartedCount > 0 && (
+                <span className="ml-0.5 px-1.5 py-0.2 rounded-md bg-slate-900/90 text-amber-300 text-[10px] font-mono font-bold">
+                  {notStartedCount}
+                </span>
+              )}
+            </button>
+
+            <button
               id="btn-batch-send-autentique"
               onClick={handleBatchSend}
               disabled={isSendingBatch}
@@ -783,7 +832,7 @@ export function StudentSpreadsheetManager({
                 <FileSpreadsheet className="w-3.5 h-3.5" />
               </span>
             </div>
-            <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 font-mono mt-2 tracking-tight">
+            <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 font-mono tabular-nums mt-2 tracking-tight">
               {students.length}
             </div>
             <span className="text-[11px] text-slate-400 font-medium">base importada ativa</span>
@@ -796,7 +845,7 @@ export function StudentSpreadsheetManager({
                 <ShieldCheck className="w-3.5 h-3.5" />
               </span>
             </div>
-            <div className="text-2xl sm:text-3xl font-extrabold text-amber-900 font-mono mt-2 tracking-tight">
+            <div className="text-2xl sm:text-3xl font-extrabold text-amber-900 font-mono tabular-nums mt-2 tracking-tight">
               {students.filter((s) => s.status === 'enviado_autentique').length}
             </div>
             <span className="text-[11px] text-amber-700/80 font-medium">enviados via Autentique</span>
@@ -809,7 +858,7 @@ export function StudentSpreadsheetManager({
                 <FileText className="w-3.5 h-3.5" />
               </span>
             </div>
-            <div className="text-2xl sm:text-3xl font-extrabold text-indigo-900 font-mono mt-2 tracking-tight">
+            <div className="text-2xl sm:text-3xl font-extrabold text-indigo-900 font-mono tabular-nums mt-2 tracking-tight">
               {students.filter((s) => s.status === 'assinado' || s.status === 'pagamento_pendente' || s.status === 'pago' || s.status === 'matricula_confirmada').length}
             </div>
             <span className="text-[11px] text-indigo-700/80 font-medium">contratos homologados</span>
@@ -822,7 +871,7 @@ export function StudentSpreadsheetManager({
                 <CheckCircle2 className="w-3.5 h-3.5" />
               </span>
             </div>
-            <div className="text-2xl sm:text-3xl font-extrabold text-emerald-900 font-mono mt-2 tracking-tight">
+            <div className="text-2xl sm:text-3xl font-extrabold text-emerald-900 font-mono tabular-nums mt-2 tracking-tight">
               {students.filter((s) => s.status === 'pago' || s.status === 'matricula_confirmada').length}
             </div>
             <span className="text-[11px] text-emerald-700/80 font-medium">pagos via Itaú (PIX/Cartão)</span>
@@ -1172,12 +1221,16 @@ export function StudentSpreadsheetManager({
         <div className="relative w-full sm:w-96">
           <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
           <input
+            ref={searchInputRef}
             type="text"
             placeholder="Buscar por aluno, responsável, CPF, RA..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 text-sm bg-slate-50 border border-slate-200/90 rounded-xl focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none transition shadow-2xs font-medium placeholder:text-slate-400"
+            className="w-full pl-10 pr-10 py-2 text-sm bg-slate-50 border border-slate-200/90 rounded-xl focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none transition shadow-2xs font-medium placeholder:text-slate-400"
           />
+          <kbd className="kbd-chip absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none hidden sm:inline-flex">
+            /
+          </kbd>
         </div>
 
         <div className="flex items-center gap-2.5 w-full sm:w-auto overflow-x-auto">
@@ -1318,6 +1371,13 @@ export function StudentSpreadsheetManager({
 
                     <td className="py-4 px-5">
                       {getStatusBadge(student.status)}
+                      {student.lastReminderSentAt && (
+                        <div className="text-[11px] text-amber-800 mt-1 flex items-center gap-1 font-semibold">
+                          <Mail className="w-3 h-3 text-amber-600" />
+                          Lembrete ({student.reminderCount || 1}x) em{' '}
+                          {new Date(student.lastReminderSentAt).toLocaleDateString('pt-BR')}
+                        </div>
+                      )}
                       {student.autentiqueSignedAt && (
                         <div className="text-[11px] text-slate-500 mt-1 flex items-center gap-1 font-medium">
                           <CheckCircle2 className="w-3 h-3 text-emerald-600" />
@@ -1343,6 +1403,18 @@ export function StudentSpreadsheetManager({
                           <Edit3 className="w-3.5 h-3.5 text-slate-500" />
                           <span>Editar</span>
                         </button>
+
+                        {isStudentNotStarted(student) && (
+                          <button
+                            id={`btn-reminder-student-${student.id}`}
+                            onClick={() => openReminderModal([student.id])}
+                            title="Enviar Lembrete de Rematrícula por e-mail com link direto para o Portal"
+                            className="px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 active:scale-95 text-amber-800 border border-amber-300/80 rounded-lg text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-2xs select-none"
+                          >
+                            <BellRing className="w-3.5 h-3.5 text-amber-600" />
+                            <span>Lembrete</span>
+                          </button>
+                        )}
 
                         {student.status === 'importado' && (
                           <button
@@ -1602,6 +1674,77 @@ Thiago Oliveira Dias,RA-2026-9902,3º Ano Ensino Médio,3º B,Matutino,Lucia Oli
           </div>
         </div>
       )}
+
+      {/* Enrollment Reminder Email Modal */}
+      {isReminderModalOpen && (
+        <EnrollmentReminderModal
+          isOpen={isReminderModalOpen}
+          onClose={() => setIsReminderModalOpen(false)}
+          students={students}
+          initialSelectedIds={reminderTargetIds}
+          contractTemplate={template}
+          savedTemplate={settings?.reminderTemplate}
+          onSaveTemplate={(updatedTpl) => {
+            onUpdateReminderTemplate?.(updatedTpl);
+          }}
+          onUpdateStudents={(updatedList) => {
+            onUpdateStudents(updatedList);
+            showLocalFeedback('Lembrete(s) de rematrícula disparado(s) por e-mail com link direto ao Portal!', 'success');
+          }}
+          onOpenPortal={onOpenPortal}
+        />
+      )}
+
+      {/* Animated In-App Delete Confirmation Modal */}
+      <AnimatePresence>
+        {studentToDelete && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.14 }}
+            onClick={() => setStudentToDelete(null)}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 backdrop-blur-xs p-4"
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96, y: 8 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 8 }}
+              transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white rounded-2xl max-w-md w-full p-6 border border-slate-200 shadow-2xl space-y-4"
+            >
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 border border-rose-200 flex items-center justify-center shrink-0">
+                  <Trash2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Remover Aluno da Planilha?</h3>
+                  <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                    Tem certeza que deseja excluir <strong className="text-slate-800">{studentToDelete.name}</strong> da lista de rematrículas? Esta ação pode ser revertida apenas reimportando os dados.
+                  </p>
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setStudentToDelete(null)}
+                  className="px-4 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 cursor-pointer transition"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmDeleteStudent}
+                  className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold cursor-pointer transition shadow-xs"
+                >
+                  Confirmar Exclusão
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

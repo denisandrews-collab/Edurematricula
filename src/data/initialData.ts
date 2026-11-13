@@ -1,5 +1,6 @@
 import { Student, ContractTemplate, IntegrationSettings, PortalEditablePermissions } from '../types';
 import { DEFAULT_INSTALLMENT_TIERS, DEFAULT_PROPOSAL_CAMPAIGN } from '../utils/installmentHelper';
+import { DEFAULT_REMINDER_TEMPLATE } from '../utils/reminderHelper';
 
 export const DEFAULT_PORTAL_PERMISSIONS: PortalEditablePermissions = {
   allowAddress: true,
@@ -438,6 +439,43 @@ export const INITIAL_STUDENTS: Student[] = [
       },
     ],
   },
+  {
+    id: 'std_07',
+    name: 'Rafael Oliveira Mendes',
+    ra: 'RA-2026-3815',
+    birthDate: '2014-03-22',
+    serie: '6º Ano do Ensino Fundamental II',
+    turma: '6º Ano B',
+    shift: 'Matutino',
+    academicYear: '2026',
+    responsibleName: 'Fernanda Oliveira Mendes',
+    responsibleCpf: '789.012.345-66',
+    responsibleEmail: 'fernanda.mendes@uol.com.br',
+    responsiblePhone: '(11) 92345-6789',
+    responsibleAddress: 'Rua Haddock Lobo, 1120 - Cerqueira César, São Paulo - SP',
+    responsibleRg: '36.789.012-1 SSP/SP',
+    responsibleKinship: 'Mãe / Responsável Pedagógica',
+    responsible2Name: 'Eduardo Mendes Silva',
+    responsible2Cpf: '890.123.456-77',
+    responsible2Email: 'eduardo.mendes@consultoria.com.br',
+    responsible2Phone: '(11) 91234-9988',
+    responsible2Address: 'Rua Haddock Lobo, 1120 - Cerqueira César, São Paulo - SP',
+    responsible2Rg: '29.456.123-8 SSP/SP',
+    responsible2Kinship: 'Pai / Responsável Financeiro',
+    tuitionValue: 1800.0,
+    discountValue: 150.0,
+    finalValue: 1650.0,
+    dueDate: '2026-09-15',
+    status: 'importado',
+    protocolNumber: 'REM-2026-007',
+    historyLogs: [
+      {
+        timestamp: '2026-08-14T08:30:00Z',
+        action: 'Importação de Planilha',
+        details: 'Dados carregados via planilha; aguardando início do processo pelo responsável.',
+      },
+    ],
+  },
 ];
 
 export const INITIAL_INTEGRATION_SETTINGS: IntegrationSettings = {
@@ -467,4 +505,5 @@ export const INITIAL_INTEGRATION_SETTINGS: IntegrationSettings = {
     enabled: true,
   },
   portalPermissions: DEFAULT_PORTAL_PERMISSIONS,
+  reminderTemplate: DEFAULT_REMINDER_TEMPLATE,
 };

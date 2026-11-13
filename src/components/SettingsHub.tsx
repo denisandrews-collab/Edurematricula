@@ -3,6 +3,7 @@ import { IntegrationSettings, InstallmentTier, ProposalCampaignSettings, PortalE
 import { InstallmentPlanManager } from './InstallmentPlanManager';
 import { DEFAULT_INSTALLMENT_TIERS, DEFAULT_PROPOSAL_CAMPAIGN } from '../utils/installmentHelper';
 import { DEFAULT_PORTAL_PERMISSIONS } from '../data/initialData';
+import { DEFAULT_REMINDER_TEMPLATE, REMINDER_PLACEHOLDERS } from '../utils/reminderHelper';
 import {
   Settings,
   ShieldCheck,
@@ -23,6 +24,8 @@ import {
   UserCheck,
   ShieldAlert,
   AlertTriangle,
+  BellRing,
+  RotateCcw,
 } from 'lucide-react';
 
 interface Props {
@@ -49,16 +52,19 @@ export function SettingsHub({ settings, onUpdateSettings }: Props) {
   const handleTestAutentique = async () => {
     setIsTestingAutentique(true);
     setTestResultAutentique(null);
+    const start = performance.now();
     try {
       const res = await fetch('/api/autentique/test-connection', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token: formSettings.autentique.apiKey }),
+        signal: AbortSignal.timeout(6000),
       });
       const data = await res.json();
+      const rtt = Math.round(performance.now() - start);
       setIsTestingAutentique(false);
       if (data.success) {
-        setTestResultAutentique(data.message || 'Conexão com a API Autentique v2 GraphQL verificada e ativa.');
+        setTestResultAutentique(`${data.message || 'Conexão com a API Autentique v2 GraphQL verificada e ativa.'} (${rtt} ms)`);
       } else {
         setTestResultAutentique(data.message || 'Erro ao validar token na API Autentique.');
       }
@@ -71,13 +77,17 @@ export function SettingsHub({ settings, onUpdateSettings }: Props) {
   const handleTestItau = async () => {
     setIsTestingItau(true);
     setTestResultItau(null);
+    const start = performance.now();
     try {
-      const res = await fetch('/api/config');
+      const res = await fetch('/api/config', { signal: AbortSignal.timeout(4000) });
       const data = await res.json();
-      setTimeout(() => {
-        setIsTestingItau(false);
-        setTestResultItau('Conexão com Gateway Itaú Empresas Pix/Boleto verificada e ativa.');
-      }, 600);
+      const rtt = Math.round(performance.now() - start);
+      setIsTestingItau(false);
+      if (data.itau?.hasEnvCredentials) {
+        setTestResultItau(`Conexão com Gateway Itaú Empresas ativa (${data.itau.environment}) em ${rtt} ms.`);
+      } else {
+        setTestResultItau(`Gateway Itaú Empresas em modo Sandbox ativo (${rtt} ms) com geração de Pix e Boletos.`);
+      }
     } catch {
       setIsTestingItau(false);
       setTestResultItau('Modo Sandbox Itaú ativo com geração de QR Code Pix e Linhas Digitáveis.');
@@ -87,17 +97,22 @@ export function SettingsHub({ settings, onUpdateSettings }: Props) {
   const handleTestRede = async () => {
     setIsTestingRede(true);
     setTestResultRede(null);
+    const start = performance.now();
     try {
-      const res = await fetch('/api/config');
+      const res = await fetch('/api/config', { signal: AbortSignal.timeout(4000) });
       const data = await res.json();
-      setTimeout(() => {
-        setIsTestingRede(false);
-        if (data.rede?.configured) {
-          setTestResultRede(`Conexão com e.Rede Itaú OK! PV: ${data.rede.pv || 'Configurado'} (Modo: ${data.rede.sandbox ? 'Sandbox' : 'Produção'}).`);
-        } else {
-          setTestResultRede('e.Rede em modo Sandbox/Simulação ativa (Credenciais opcionais).');
-        }
-      }, 600);
+      const rtt = Math.round(performance.now() - start);
+      setIsTestingRede(false);
+      const hasCustomCreds = Boolean(formSettings.rede?.pv && formSettings.rede?.token);
+      if (data.rede?.hasEnvCredentials || hasCustomCreds) {
+        setTestResultRede(
+          `Conexão com e.Rede Itaú verificada em ${rtt} ms! PV: ${data.rede?.pvMasked || formSettings.rede?.pv} (${
+            data.rede?.sandbox ?? formSettings.rede?.sandbox ? 'Sandbox' : 'Produção'
+          }).`
+        );
+      } else {
+        setTestResultRede(`e.Rede pronto em modo Sandbox/Simulação ativa (${rtt} ms).`);
+      }
     } catch {
       setIsTestingRede(false);
       setTestResultRede('Modo Simulação e.Rede ativo com emissão de Pix e autorização de cartões.');
@@ -677,6 +692,138 @@ export function SettingsHub({ settings, onUpdateSettings }: Props) {
               }
               className="w-full px-3 py-2 bg-slate-50/50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-orange-500 focus:outline-none font-semibold text-emerald-700"
             />
+          </div>
+        </div>
+      </div>
+
+      {/* Template de E-mail: Lembrete de Rematrícula */}
+      <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-xs space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-100 gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-amber-50 border border-amber-200/80 text-amber-700 flex items-center justify-center font-bold">
+              <BellRing className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-slate-900">
+                Template de E-mail • Lembrete de Rematrícula
+              </h2>
+              <p className="text-xs text-slate-500">
+                Modelo padrão utilizado nos disparos automáticos para pais que ainda não iniciaram a rematrícula.
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() =>
+              setFormSettings({
+                ...formSettings,
+                reminderTemplate: DEFAULT_REMINDER_TEMPLATE,
+              })
+            }
+            className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer self-start sm:self-auto"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span>Restaurar Padrão</span>
+          </button>
+        </div>
+
+        <div className="space-y-3 text-xs">
+          <div>
+            <label className="block font-semibold text-slate-700 mb-1">Assunto do E-mail</label>
+            <input
+              type="text"
+              value={(formSettings.reminderTemplate || DEFAULT_REMINDER_TEMPLATE).subject}
+              onChange={(e) => {
+                const current = formSettings.reminderTemplate || DEFAULT_REMINDER_TEMPLATE;
+                setFormSettings({
+                  ...formSettings,
+                  reminderTemplate: { ...current, subject: e.target.value },
+                });
+              }}
+              className="w-full px-3 py-2 bg-slate-50/50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none font-semibold"
+            />
+          </div>
+
+          <div className="flex flex-wrap gap-1.5 bg-slate-50 p-2.5 rounded-xl border border-slate-200/80">
+            <span className="w-full text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-0.5">
+              Tags disponíveis para personalização (clique para adicionar ao texto):
+            </span>
+            {REMINDER_PLACEHOLDERS.map((item) => (
+              <button
+                key={item.tag}
+                type="button"
+                onClick={() => {
+                  const current = formSettings.reminderTemplate || DEFAULT_REMINDER_TEMPLATE;
+                  setFormSettings({
+                    ...formSettings,
+                    reminderTemplate: {
+                      ...current,
+                      body: `${current.body}\n${item.tag}`,
+                    },
+                  });
+                }}
+                className="px-2 py-0.5 rounded-md bg-white hover:bg-amber-50 border border-slate-200 text-[10px] font-mono font-bold text-slate-700 cursor-pointer"
+              >
+                {item.tag}
+              </button>
+            ))}
+          </div>
+
+          <div>
+            <label className="block font-semibold text-slate-700 mb-1">
+              Mensagem do E-mail (com Link Direto do Portal)
+            </label>
+            <textarea
+              rows={7}
+              value={(formSettings.reminderTemplate || DEFAULT_REMINDER_TEMPLATE).body}
+              onChange={(e) => {
+                const current = formSettings.reminderTemplate || DEFAULT_REMINDER_TEMPLATE;
+                setFormSettings({
+                  ...formSettings,
+                  reminderTemplate: { ...current, body: e.target.value },
+                });
+              }}
+              className="w-full px-3 py-2 bg-slate-50/50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none leading-relaxed"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+            <label className="flex items-center gap-2 p-3 rounded-xl bg-slate-50 border border-slate-200 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={(formSettings.reminderTemplate || DEFAULT_REMINDER_TEMPLATE).sendToSecondResponsible}
+                onChange={(e) => {
+                  const current = formSettings.reminderTemplate || DEFAULT_REMINDER_TEMPLATE;
+                  setFormSettings({
+                    ...formSettings,
+                    reminderTemplate: { ...current, sendToSecondResponsible: e.target.checked },
+                  });
+                }}
+                className="w-4 h-4 rounded text-amber-600 focus:ring-amber-500 cursor-pointer"
+              />
+              <span className="font-semibold text-slate-700">
+                Enviar cópia para o 2º Responsável (quando cadastrado)
+              </span>
+            </label>
+
+            <label className="flex items-center gap-2 p-3 rounded-xl bg-slate-50 border border-slate-200 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={(formSettings.reminderTemplate || DEFAULT_REMINDER_TEMPLATE).autoIncludePortalLink}
+                onChange={(e) => {
+                  const current = formSettings.reminderTemplate || DEFAULT_REMINDER_TEMPLATE;
+                  setFormSettings({
+                    ...formSettings,
+                    reminderTemplate: { ...current, autoIncludePortalLink: e.target.checked },
+                  });
+                }}
+                className="w-4 h-4 rounded text-amber-600 focus:ring-amber-500 cursor-pointer"
+              />
+              <span className="font-semibold text-slate-700">
+                Garantir inclusão automática do link do Portal
+              </span>
+            </label>
           </div>
         </div>
       </div>

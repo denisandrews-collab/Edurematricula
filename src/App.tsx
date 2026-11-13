@@ -3,7 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef, Suspense, lazy } from 'react';
+import { MotionConfig, AnimatePresence, motion } from 'motion/react';
+import { CheckCircle2, AlertCircle, Info, X } from 'lucide-react';
 import { Student, ContractTemplate, IntegrationSettings } from './types';
 import {
   INITIAL_STUDENTS,
@@ -11,15 +13,59 @@ import {
   INITIAL_INTEGRATION_SETTINGS,
 } from './data/initialData';
 import { apiService } from './services/apiService';
-import { validateNewEnrollment, filterNewEnrollmentsBatch } from './utils/studentValidation';
+import { filterNewEnrollmentsBatch } from './utils/studentValidation';
 import { Navbar } from './components/Navbar';
 import { StudentSpreadsheetManager } from './components/StudentSpreadsheetManager';
-import { ContractTemplateEditor } from './components/ContractTemplateEditor';
-import { AutentiqueHub } from './components/AutentiqueHub';
-import { ItauPaymentHub } from './components/ItauPaymentHub';
-import { SettingsHub } from './components/SettingsHub';
-import { ParentPortal } from './components/ParentPortal';
-import { StudentDetailModal } from './components/StudentDetailModal';
+import { CommandPalette, ShortcutsHelpModal, AppTab } from './components/CommandPalette';
+
+// Code-split heavy secondary modules for instant first-paint performance
+const ContractTemplateEditor = lazy(() =>
+  import('./components/ContractTemplateEditor').then((m) => ({ default: m.ContractTemplateEditor }))
+);
+const AutentiqueHub = lazy(() =>
+  import('./components/AutentiqueHub').then((m) => ({ default: m.AutentiqueHub }))
+);
+const ItauPaymentHub = lazy(() =>
+  import('./components/ItauPaymentHub').then((m) => ({ default: m.ItauPaymentHub }))
+);
+const SettingsHub = lazy(() =>
+  import('./components/SettingsHub').then((m) => ({ default: m.SettingsHub }))
+);
+const ParentPortal = lazy(() =>
+  import('./components/ParentPortal').then((m) => ({ default: m.ParentPortal }))
+);
+const StudentDetailModal = lazy(() =>
+  import('./components/StudentDetailModal').then((m) => ({ default: m.StudentDetailModal }))
+);
+
+function ViewLoadingFallback() {
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200/80 p-8 shadow-2xs space-y-5">
+      <div className="flex items-center justify-between">
+        <div className="space-y-2">
+          <div className="h-5 w-52 bg-slate-200/80 rounded-lg animate-pulse" />
+          <div className="h-3.5 w-80 bg-slate-100 rounded-md animate-pulse" />
+        </div>
+        <div className="h-9 w-36 bg-slate-100 rounded-xl animate-pulse" />
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="h-24 bg-slate-50 border border-slate-100 rounded-xl animate-pulse" />
+        <div className="h-24 bg-slate-50 border border-slate-100 rounded-xl animate-pulse" />
+        <div className="h-24 bg-slate-50 border border-slate-100 rounded-xl animate-pulse" />
+      </div>
+      <div className="h-64 bg-slate-50/70 border border-slate-100 rounded-xl animate-pulse" />
+    </div>
+  );
+}
+
+type SpreadsheetActionType =
+  | 'import'
+  | 'new_student'
+  | 'batch_send'
+  | 'reminder'
+  | 'export_excel'
+  | 'focus_search'
+  | null;
 
 export default function App() {
   // Application State
@@ -54,16 +100,30 @@ export default function App() {
   });
 
   // Active View Tab and Suboptions
-  const [currentTab, setCurrentTab] = useState<
-    'spreadsheet' | 'contract' | 'autentique' | 'itau' | 'settings' | 'portal'
-  >('spreadsheet');
+  const [currentTab, setCurrentTab] = useState<AppTab>('spreadsheet');
   const [contractSubTab, setContractSubTab] = useState<'editor' | 'preview' | 'school'>('preview');
-  const [spreadsheetAction, setSpreadsheetAction] = useState<'import' | 'new_student' | 'batch_send' | null>(null);
+  const [spreadsheetAction, setSpreadsheetAction] = useState<SpreadsheetActionType>(null);
 
-  // Currently Selected Student for Detail / Preview / Portal
-  const [selectedStudent, setSelectedStudent] = useState<Student>(() => students[0] || INITIAL_STUDENTS[0]);
+  // Single source of truth for selected student (prevents stale copies across views)
+  const [selectedStudentId, setSelectedStudentId] = useState<string>(
+    () => (students[0] || INITIAL_STUDENTS[0]).id
+  );
+  const selectedStudent = useMemo(
+    () => students.find((s) => s.id === selectedStudentId) || students[0] || INITIAL_STUDENTS[0],
+    [students, selectedStudentId]
+  );
+  const setSelectedStudent = (student: Student) => {
+    setSelectedStudentId(student.id);
+  };
+
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
-  const [globalToast, setGlobalToast] = useState<{ message: string; type: 'success' | 'info' | 'error' } | null>(null);
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const [isShortcutsHelpOpen, setIsShortcutsHelpOpen] = useState(false);
+  const [globalToast, setGlobalToast] = useState<{
+    message: string;
+    type: 'success' | 'info' | 'error';
+  } | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Sync to localStorage
   useEffect(() => {
@@ -85,16 +145,24 @@ export default function App() {
   }, [settings]);
 
   // Handle Tab Switch cleanly with suboption support
-  const handleSelectTab = (
-    tab: 'spreadsheet' | 'contract' | 'autentique' | 'itau' | 'settings' | 'portal',
-    subOption?: string
-  ) => {
+  const handleSelectTab = (tab: AppTab, subOption?: string) => {
     setCurrentTab(tab);
-    if (tab === 'contract' && (subOption === 'preview' || subOption === 'editor' || subOption === 'school')) {
+    if (
+      tab === 'contract' &&
+      (subOption === 'preview' || subOption === 'editor' || subOption === 'school')
+    ) {
       setContractSubTab(subOption);
     }
-    if (tab === 'spreadsheet' && (subOption === 'import' || subOption === 'new_student' || subOption === 'batch_send')) {
-      setSpreadsheetAction(subOption as any);
+    if (
+      tab === 'spreadsheet' &&
+      (subOption === 'import' ||
+        subOption === 'new_student' ||
+        subOption === 'batch_send' ||
+        subOption === 'reminder' ||
+        subOption === 'export_excel' ||
+        subOption === 'focus_search')
+    ) {
+      setSpreadsheetAction(subOption);
     }
     try {
       const url = new URL(window.location.href);
@@ -117,7 +185,7 @@ export default function App() {
       if (studentIdParam) {
         const found = students.find((s) => s.id === studentIdParam);
         if (found) {
-          setSelectedStudent(found);
+          setSelectedStudentId(found.id);
         }
       }
 
@@ -125,14 +193,114 @@ export default function App() {
         viewParam &&
         ['spreadsheet', 'contract', 'autentique', 'itau', 'settings', 'portal'].includes(viewParam)
       ) {
-        setCurrentTab(viewParam as any);
+        setCurrentTab(viewParam as AppTab);
       }
     } catch {}
   }, []); // Run only once on mount
 
+  // Global Keyboard Shortcuts & Command Palette Listener
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const isEditable =
+        !!target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable);
+
+      // Ctrl+K / Cmd+K -> Toggle Command Palette (works everywhere)
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setIsShortcutsHelpOpen(false);
+        setIsCommandPaletteOpen((prev) => !prev);
+        return;
+      }
+
+      // Escape -> Close active top overlays
+      if (e.key === 'Escape') {
+        if (isCommandPaletteOpen) {
+          setIsCommandPaletteOpen(false);
+          return;
+        }
+        if (isShortcutsHelpOpen) {
+          setIsShortcutsHelpOpen(false);
+          return;
+        }
+        if (isDetailModalOpen) {
+          setIsDetailModalOpen(false);
+          return;
+        }
+      }
+
+      // Alt + 1..6 -> Instant tab switching
+      if (e.altKey && !e.ctrlKey && !e.metaKey) {
+        const tabMap: Record<string, AppTab> = {
+          '1': 'spreadsheet',
+          '2': 'contract',
+          '3': 'autentique',
+          '4': 'itau',
+          '5': 'settings',
+          '6': 'portal',
+        };
+        const nextTab = tabMap[e.key];
+        if (nextTab) {
+          e.preventDefault();
+          handleSelectTab(nextTab);
+          return;
+        }
+      }
+
+      // Single-key shortcuts (only outside inputs and when overlays are closed)
+      if (
+        isEditable ||
+        e.ctrlKey ||
+        e.metaKey ||
+        e.altKey ||
+        isCommandPaletteOpen ||
+        isShortcutsHelpOpen ||
+        isDetailModalOpen
+      ) {
+        return;
+      }
+
+      const keyLower = e.key.toLowerCase();
+
+      if (e.key === '?') {
+        e.preventDefault();
+        setIsShortcutsHelpOpen(true);
+      } else if (keyLower === 'n') {
+        e.preventDefault();
+        handleSelectTab('spreadsheet', 'new_student');
+      } else if (keyLower === 'i') {
+        e.preventDefault();
+        handleSelectTab('spreadsheet', 'import');
+      } else if (keyLower === 'l') {
+        e.preventDefault();
+        handleSelectTab('spreadsheet', 'reminder');
+      } else if (keyLower === 'e') {
+        e.preventDefault();
+        handleSelectTab('spreadsheet', 'export_excel');
+      } else if (e.key === '/') {
+        e.preventDefault();
+        if (currentTab === 'spreadsheet') {
+          setSpreadsheetAction('focus_search');
+        } else {
+          setIsCommandPaletteOpen(true);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [currentTab, isCommandPaletteOpen, isShortcutsHelpOpen, isDetailModalOpen]);
+
   const showToast = (message: string, type: 'success' | 'info' | 'error' = 'success') => {
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+    }
     setGlobalToast({ message, type });
-    setTimeout(() => setGlobalToast(null), 3500);
+    toastTimerRef.current = setTimeout(() => setGlobalToast(null), 3500);
   };
 
   // Dispatch individual contract to Autentique
@@ -140,73 +308,77 @@ export default function App() {
     try {
       const res = await apiService.createAutentiqueDocument(student, contractTemplate, settings);
 
-      const updated = students.map((s) => {
-        if (s.id === student.id) {
-          return {
-            ...s,
-            status: 'enviado_autentique' as const,
-            autentiqueDocId: res.documentId,
-            autentiqueSignUrl: res.signUrl,
-            autentiqueStatus: 'PENDENTE' as const,
-            historyLogs: [
-              ...s.historyLogs,
-              {
-                timestamp: new Date().toISOString(),
-                action: 'Contrato Gerado e Enviado para Autentique',
-                details: `Documento ${res.documentId} criado e link enviado para ${student.responsibleEmail}.`,
-              },
-            ],
-          };
-        }
-        return s;
-      });
+      setStudents((prev) =>
+        prev.map((s) => {
+          if (s.id === student.id) {
+            return {
+              ...s,
+              status: 'enviado_autentique' as const,
+              autentiqueDocId: res.documentId,
+              autentiqueSignUrl: res.signUrl,
+              autentiqueStatus: 'PENDENTE' as const,
+              historyLogs: [
+                ...s.historyLogs,
+                {
+                  timestamp: new Date().toISOString(),
+                  action: 'Contrato Gerado e Enviado para Autentique',
+                  details: `Documento ${res.documentId} criado e link enviado para ${student.responsibleEmail}.`,
+                },
+              ],
+            };
+          }
+          return s;
+        })
+      );
 
-      setStudents(updated);
       showToast(`Contrato de ${student.name} enviado para a API Autentique com sucesso!`);
     } catch (e: any) {
       showToast(`Erro ao enviar para Autentique: ${e.message}`, 'error');
     }
   };
 
-  // Batch dispatch to Autentique
+  // Concurrent Batch dispatch to Autentique (single network roundtrip)
   const handleBatchSendAutentique = async (targetStudents: Student[]) => {
+    if (targetStudents.length === 0) return;
+
+    const batchResults = await apiService.createAutentiqueBatch(
+      targetStudents,
+      contractTemplate,
+      settings
+    );
     let successCount = 0;
-    const updated = [...students];
 
-    for (const student of targetStudents) {
-      try {
-        const res = await apiService.createAutentiqueDocument(student, contractTemplate, settings);
-        const idx = updated.findIndex((s) => s.id === student.id);
-        if (idx !== -1) {
-          updated[idx] = {
-            ...updated[idx],
-            status: 'enviado_autentique',
-            autentiqueDocId: res.documentId,
-            autentiqueSignUrl: res.signUrl,
-            autentiqueStatus: 'PENDENTE',
-            historyLogs: [
-              ...updated[idx].historyLogs,
-              {
-                timestamp: new Date().toISOString(),
-                action: 'Contrato Gerado em Lote (API Autentique)',
-                details: `Disparado e-mail de assinatura para ${student.responsibleEmail}.`,
-              },
-            ],
-          };
-          successCount++;
-        }
-      } catch (err) {
-        console.error(err);
-      }
-    }
+    setStudents((prev) =>
+      prev.map((s) => {
+        const res = batchResults[s.id];
+        if (!res || !res.success) return s;
+        successCount++;
+        return {
+          ...s,
+          status: 'enviado_autentique' as const,
+          autentiqueDocId: res.documentId,
+          autentiqueSignUrl: res.signUrl,
+          autentiqueStatus: 'PENDENTE' as const,
+          historyLogs: [
+            ...s.historyLogs,
+            {
+              timestamp: new Date().toISOString(),
+              action: 'Contrato Gerado em Lote (API Autentique)',
+              details: `Disparado e-mail de assinatura para ${s.responsibleEmail}.`,
+            },
+          ],
+        };
+      })
+    );
 
-    setStudents(updated);
-    showToast(`${successCount} contratos gerados e disparados via API Autentique em lote!`);
+    const dispatchedTotal = Object.values(batchResults).filter((r) => r?.success).length;
+    showToast(
+      `${dispatchedTotal || successCount} contratos gerados e disparados via API Autentique em lote!`
+    );
   };
 
   // Atualização segura do estado global dos alunos com validação de rematrícula
   const handleUpdateStudents = (updatedOrNewList: Student[]) => {
-    // Se a lista aumentou de tamanho, novos alunos estão sendo inseridos (manual, lote ou importação)
     if (updatedOrNewList.length > students.length) {
       const existingIds = new Set(students.map((s) => s.id));
       const newlyAddedCandidates = updatedOrNewList.filter((s) => !existingIds.has(s.id));
@@ -214,17 +386,18 @@ export default function App() {
       const { valid, blocked } = filterNewEnrollmentsBatch(newlyAddedCandidates, students);
 
       if (blocked.length > 0) {
-        const sampleReason = blocked[0].reason;
         showToast(
           `Bloqueio de Rematrícula: ${blocked.length} registro(s) impedido(s) por já possuírem rematrícula em processamento ou concluída.`,
           'error'
         );
         console.warn('Tentativa de criação de rematrícula bloqueada pelo estado global:', blocked);
 
-        // Se houver alunos válidos sem conflito, mescla apenas os válidos
         if (valid.length > 0) {
           setStudents([...valid, ...students]);
-          showToast(`${valid.length} nova(s) rematrícula(s) permitida(s) e adicionada(s).`, 'success');
+          showToast(
+            `${valid.length} nova(s) rematrícula(s) permitida(s) e adicionada(s).`,
+            'success'
+          );
         }
         return;
       }
@@ -235,137 +408,208 @@ export default function App() {
 
   const handleUpdateStudent = (updatedStudent: Student) => {
     setStudents((prev) => prev.map((s) => (s.id === updatedStudent.id ? updatedStudent : s)));
-    setSelectedStudent(updatedStudent);
   };
 
   const handleOpenPortal = (student: Student) => {
-    setSelectedStudent(student);
-    setCurrentTab('portal');
+    setSelectedStudentId(student.id);
+    handleSelectTab('portal');
   };
 
   const handleSelectStudentFromTable = (student: Student) => {
-    setSelectedStudent(student);
+    setSelectedStudentId(student.id);
     setIsDetailModalOpen(true);
   };
 
   return (
-    <div className="min-h-screen bg-slate-100 text-slate-900 flex flex-col font-sans selection:bg-blue-600 selection:text-white">
-      {/* Top Navbar */}
-      <Navbar
-        currentTab={currentTab}
-        onSelectTab={handleSelectTab}
-        students={students}
-        selectedStudent={selectedStudent}
-        onSelectStudent={setSelectedStudent}
-        settings={settings}
-        onQuickAction={(action) => {
-          setSpreadsheetAction(action);
-          setCurrentTab('spreadsheet');
-        }}
-      />
-
-      {/* Global Toast Notification */}
-      {globalToast && (
-        <div className="fixed bottom-6 right-6 z-50 animate-bounce">
-          <div
-            className={`px-4 py-3 rounded-2xl shadow-xl border text-xs font-semibold flex items-center gap-2 ${
-              globalToast.type === 'error'
-                ? 'bg-rose-900 text-white border-rose-700'
-                : 'bg-slate-900 text-white border-slate-700'
-            }`}
-          >
-            <span>{globalToast.message}</span>
-            <button onClick={() => setGlobalToast(null)} className="text-slate-400 hover:text-white ml-2">
-              ✕
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Main Content Body */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
-        {currentTab === 'spreadsheet' && (
-          <StudentSpreadsheetManager
-            students={students}
-            onUpdateStudents={handleUpdateStudents}
-            onSelectStudent={handleSelectStudentFromTable}
-            onOpenPortal={handleOpenPortal}
-            onSendAutentique={handleSendAutentique}
-            onBatchSendAutentique={handleBatchSendAutentique}
-            template={contractTemplate}
-            initialAction={spreadsheetAction}
-            onClearInitialAction={() => setSpreadsheetAction(null)}
-          />
-        )}
-
-        {currentTab === 'contract' && (
-          <ContractTemplateEditor
-            template={contractTemplate}
-            onUpdateTemplate={setContractTemplate}
-            students={students}
-            selectedStudent={selectedStudent}
-            onSelectStudent={setSelectedStudent}
-            initialSubTab={contractSubTab}
-          />
-        )}
-
-        {currentTab === 'autentique' && (
-          <AutentiqueHub
-            students={students}
-            onUpdateStudents={setStudents}
-            onOpenPortal={handleOpenPortal}
-            template={contractTemplate}
-            settings={settings}
-          />
-        )}
-
-        {currentTab === 'itau' && (
-          <ItauPaymentHub
-            students={students}
-            onUpdateStudents={setStudents}
-            onOpenPortal={handleOpenPortal}
-            settings={settings}
-          />
-        )}
-
-        {currentTab === 'settings' && (
-          <SettingsHub settings={settings} onUpdateSettings={setSettings} />
-        )}
-
-        {currentTab === 'portal' && (
-          <ParentPortal
-            student={selectedStudent}
-            students={students}
-            onSelectStudent={setSelectedStudent}
-            onUpdateStudent={handleUpdateStudent}
-            template={contractTemplate}
-            settings={settings}
-            onBackToAdmin={() => setCurrentTab('spreadsheet')}
-          />
-        )}
-      </main>
-
-      {/* Student Audit Trail & Quick Detail Modal */}
-      {isDetailModalOpen && (
-        <StudentDetailModal
-          student={selectedStudent}
-          onClose={() => setIsDetailModalOpen(false)}
-          onOpenPortal={handleOpenPortal}
-          onSendAutentique={handleSendAutentique}
-          onUpdateStudent={handleUpdateStudent}
-          template={contractTemplate}
+    <MotionConfig reducedMotion="user">
+      <div className="min-h-screen bg-slate-100 text-slate-900 flex flex-col font-sans selection:bg-blue-600 selection:text-white">
+        {/* Top Navbar */}
+        <Navbar
+          currentTab={currentTab}
+          onSelectTab={handleSelectTab}
+          students={students}
+          selectedStudent={selectedStudent}
+          onSelectStudent={setSelectedStudent}
+          settings={settings}
+          onQuickAction={(action) => {
+            setSpreadsheetAction(action);
+            handleSelectTab('spreadsheet');
+          }}
+          onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
+          onOpenShortcutsHelp={() => setIsShortcutsHelpOpen(true)}
         />
-      )}
 
-      {/* Footer */}
-      <footer className="bg-white border-t border-slate-200/80 py-4 px-6 text-center text-xs text-slate-500">
-        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
-          <span>Sistema Escolar de Rematrícula Automatizada • Ano Letivo 2026</span>
-          <span className="text-[11px] text-slate-400">
-            Integrado com <strong>API Autentique v2 GraphQL</strong> (Assinaturas) e <strong>API Itaú Cobrança</strong> (PIX, Boleto e Cartão)
-          </span>
-        </div>
-      </footer>
-    </div>
+        {/* Animated Global Toast Notification */}
+        <AnimatePresence>
+          {globalToast && (
+            <motion.div
+              initial={{ opacity: 0, y: 16, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 12, scale: 0.96 }}
+              transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+              className="fixed bottom-6 right-6 z-50 max-w-md"
+              role="status"
+              aria-live="polite"
+            >
+              <div
+                className={`px-4 py-3 rounded-2xl shadow-xl border text-xs font-semibold flex items-center gap-2.5 ${
+                  globalToast.type === 'error'
+                    ? 'bg-rose-950 text-white border-rose-800'
+                    : globalToast.type === 'info'
+                    ? 'bg-indigo-950 text-white border-indigo-800'
+                    : 'bg-slate-900 text-white border-slate-700'
+                }`}
+              >
+                {globalToast.type === 'error' ? (
+                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                ) : globalToast.type === 'info' ? (
+                  <Info className="w-4 h-4 text-indigo-400 shrink-0" />
+                ) : (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                )}
+                <span className="leading-snug">{globalToast.message}</span>
+                <button
+                  type="button"
+                  onClick={() => setGlobalToast(null)}
+                  className="text-slate-400 hover:text-white ml-1 p-0.5 rounded-md cursor-pointer transition shrink-0"
+                  aria-label="Fechar notificação"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Main Content Body with Smooth Animated View Transitions */}
+        <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
+          <Suspense fallback={<ViewLoadingFallback />}>
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={currentTab}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -4 }}
+                transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
+              >
+                {currentTab === 'spreadsheet' && (
+                  <StudentSpreadsheetManager
+                    students={students}
+                    onUpdateStudents={handleUpdateStudents}
+                    onSelectStudent={handleSelectStudentFromTable}
+                    onOpenPortal={handleOpenPortal}
+                    onSendAutentique={handleSendAutentique}
+                    onBatchSendAutentique={handleBatchSendAutentique}
+                    template={contractTemplate}
+                    settings={settings}
+                    onUpdateReminderTemplate={(updatedReminderTemplate) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        reminderTemplate: updatedReminderTemplate,
+                      }))
+                    }
+                    initialAction={spreadsheetAction}
+                    onClearInitialAction={() => setSpreadsheetAction(null)}
+                  />
+                )}
+
+                {currentTab === 'contract' && (
+                  <ContractTemplateEditor
+                    template={contractTemplate}
+                    onUpdateTemplate={setContractTemplate}
+                    students={students}
+                    selectedStudent={selectedStudent}
+                    onSelectStudent={setSelectedStudent}
+                    initialSubTab={contractSubTab}
+                  />
+                )}
+
+                {currentTab === 'autentique' && (
+                  <AutentiqueHub
+                    students={students}
+                    onUpdateStudents={setStudents}
+                    onOpenPortal={handleOpenPortal}
+                    template={contractTemplate}
+                    settings={settings}
+                  />
+                )}
+
+                {currentTab === 'itau' && (
+                  <ItauPaymentHub
+                    students={students}
+                    onUpdateStudents={setStudents}
+                    onOpenPortal={handleOpenPortal}
+                    settings={settings}
+                  />
+                )}
+
+                {currentTab === 'settings' && (
+                  <SettingsHub settings={settings} onUpdateSettings={setSettings} />
+                )}
+
+                {currentTab === 'portal' && (
+                  <ParentPortal
+                    student={selectedStudent}
+                    students={students}
+                    onSelectStudent={setSelectedStudent}
+                    onUpdateStudent={handleUpdateStudent}
+                    template={contractTemplate}
+                    settings={settings}
+                    onBackToAdmin={() => handleSelectTab('spreadsheet')}
+                  />
+                )}
+              </motion.div>
+            </AnimatePresence>
+          </Suspense>
+        </main>
+
+        {/* Student Audit Trail & Quick Detail Modal */}
+        <Suspense fallback={null}>
+          {isDetailModalOpen && (
+            <StudentDetailModal
+              student={selectedStudent}
+              onClose={() => setIsDetailModalOpen(false)}
+              onOpenPortal={handleOpenPortal}
+              onSendAutentique={handleSendAutentique}
+              onUpdateStudent={handleUpdateStudent}
+              template={contractTemplate}
+            />
+          )}
+        </Suspense>
+
+        {/* Global Command Palette (Ctrl+K / Cmd+K) */}
+        <CommandPalette
+          isOpen={isCommandPaletteOpen}
+          onClose={() => setIsCommandPaletteOpen(false)}
+          students={students}
+          onNavigate={handleSelectTab}
+          onQuickAction={(action) => handleSelectTab('spreadsheet', action)}
+          onOpenStudentDetail={handleSelectStudentFromTable}
+          onOpenStudentPortal={handleOpenPortal}
+          onOpenShortcutsHelp={() => setIsShortcutsHelpOpen(true)}
+        />
+
+        {/* Global Keyboard Shortcuts Help Modal (?) */}
+        <ShortcutsHelpModal
+          isOpen={isShortcutsHelpOpen}
+          onClose={() => setIsShortcutsHelpOpen(false)}
+        />
+
+        {/* Footer */}
+        <footer className="bg-white border-t border-slate-200/80 py-4 px-6 text-center text-xs text-slate-500">
+          <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
+            <span>Sistema Escolar de Rematrícula Automatizada • Ano Letivo 2026</span>
+            <div className="flex items-center gap-3 text-[11px] text-slate-400">
+              <span className="hidden md:inline-flex items-center gap-1.5">
+                Atalhos: <kbd className="kbd-chip">⌘K</kbd> Busca · <kbd className="kbd-chip">?</kbd> Comandos
+              </span>
+              <span>
+                Integrado com <strong>API Autentique v2</strong> e <strong>API Itaú / Rede</strong>
+              </span>
+            </div>
+          </div>
+        </footer>
+      </div>
+    </MotionConfig>
   );
 }

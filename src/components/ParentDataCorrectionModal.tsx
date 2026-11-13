@@ -35,6 +35,13 @@ export function ParentDataCorrectionModal({
   const [formData, setFormData] = useState<Student>({ ...student });
   const [saveSuccess, setSaveSuccess] = useState(false);
 
+  const hasAnyAllowedField = Boolean(
+    permissions.allowAddress ||
+    permissions.allowPhone ||
+    permissions.allowEmail ||
+    permissions.allowSecondResponsible
+  );
+
   if (!isOpen) return null;
 
   const handleSave = (e: React.FormEvent) => {
@@ -187,6 +194,17 @@ export function ParentDataCorrectionModal({
               E-mails: {permissions.allowEmail ? 'Liberado' : 'Bloqueado'}
             </span>
 
+            <span
+              className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full font-medium ${
+                permissions.allowSecondResponsible
+                  ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                  : 'bg-slate-200 text-slate-600'
+              }`}
+            >
+              {permissions.allowSecondResponsible ? <Unlock className="w-3 h-3" /> : <Lock className="w-3 h-3" />}
+              2º Responsável: {permissions.allowSecondResponsible ? 'Liberado' : 'Bloqueado'}
+            </span>
+
             <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full font-medium bg-slate-200 text-slate-600">
               <Lock className="w-3 h-3" />
               Dados Acadêmicos: Bloqueado
@@ -197,6 +215,27 @@ export function ParentDataCorrectionModal({
               Valores / Descontos: Bloqueado
             </span>
           </div>
+
+          {permissions.allowAddress || permissions.allowPhone || permissions.allowEmail || permissions.allowSecondResponsible ? (
+            <div className="text-[11px] text-emerald-800 bg-emerald-50/90 p-2.5 rounded-lg border border-emerald-200 flex items-center gap-2 font-medium">
+              <Unlock className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>
+                Campos autorizados para você alterar: <strong>{[
+                  permissions.allowAddress ? 'Endereço Residencial' : null,
+                  permissions.allowPhone ? 'Telefones & WhatsApp' : null,
+                  permissions.allowEmail ? 'E-mails' : null,
+                  permissions.allowSecondResponsible ? '2º Responsável Solidário' : null,
+                ].filter(Boolean).join(', ')}</strong>. Os demais campos estão bloqueados com segurança.
+              </span>
+            </div>
+          ) : (
+            <div className="text-[11px] text-rose-800 bg-rose-50/90 p-2.5 rounded-lg border border-rose-200 flex items-center gap-2 font-medium">
+              <Lock className="w-4 h-4 text-rose-600 shrink-0" />
+              <span>
+                Atenção: A secretaria da escola bloqueou a edição de todos os campos cadastrais para este aluno. Os dados abaixo são exibidos apenas para leitura e conferência.
+              </span>
+            </div>
+          )}
         </div>
 
         {saveSuccess && (
@@ -438,10 +477,15 @@ export function ParentDataCorrectionModal({
 
             <button
               type="submit"
-              className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 transition shadow-xs cursor-pointer"
+              disabled={!hasAnyAllowedField}
+              className={`px-5 py-2.5 font-bold rounded-xl text-xs flex items-center gap-1.5 transition shadow-xs ${
+                hasAnyAllowedField
+                  ? 'bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer'
+                  : 'bg-slate-200 text-slate-500 cursor-not-allowed opacity-75'
+              }`}
             >
-              <Save className="w-4 h-4" />
-              <span>Salvar Alterações Permitidas</span>
+              {hasAnyAllowedField ? <Save className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
+              <span>{hasAnyAllowedField ? 'Salvar Alterações Permitidas' : 'Edição Bloqueada pela Escola'}</span>
             </button>
           </div>
         </form>

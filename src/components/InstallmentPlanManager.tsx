@@ -223,20 +223,22 @@ export function InstallmentPlanManager({
     showToast('Regras de início, término e regressão mensal salvas!');
   };
 
+  const [confirmRestore, setConfirmRestore] = useState(false);
+
   const handleRestoreDefaults = () => {
-    if (
-      window.confirm(
-        'Deseja restaurar as faixas padrão e a campanha de proposta:\n• Início: 01/08/2026 | Término: 31/12/2026\n• Redução: -1 parcela/mês e -5% desconto/mês\n• Faixas: 1-2x (20%), 3-4x (15%), 5-6x (10%), 7-8x (5%), 9-12x (0%)?'
-      )
-    ) {
-      setCurrentTiers(DEFAULT_INSTALLMENT_TIERS);
-      onSaveTiers(DEFAULT_INSTALLMENT_TIERS);
-      setCurrentCampaign(DEFAULT_PROPOSAL_CAMPAIGN);
-      if (onSaveCampaign) {
-        onSaveCampaign(DEFAULT_PROPOSAL_CAMPAIGN);
-      }
-      showToast('Configurações padrão restauradas!');
+    if (!confirmRestore) {
+      setConfirmRestore(true);
+      setTimeout(() => setConfirmRestore(false), 5000);
+      return;
     }
+    setConfirmRestore(false);
+    setCurrentTiers(DEFAULT_INSTALLMENT_TIERS);
+    onSaveTiers(DEFAULT_INSTALLMENT_TIERS);
+    setCurrentCampaign(DEFAULT_PROPOSAL_CAMPAIGN);
+    if (onSaveCampaign) {
+      onSaveCampaign(DEFAULT_PROPOSAL_CAMPAIGN);
+    }
+    showToast('Configurações padrão restauradas!');
   };
 
   const showToast = (msg: string) => {
@@ -262,11 +264,15 @@ export function InstallmentPlanManager({
           <button
             type="button"
             onClick={handleRestoreDefaults}
-            className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
+            className={`px-3 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
+              confirmRestore
+                ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-xs'
+                : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+            }`}
             title="Restaurar valores padrão"
           >
             <RotateCcw className="w-3.5 h-3.5" />
-            <span>Restaurar Padrão</span>
+            <span>{confirmRestore ? 'Confirmar Restauração?' : 'Restaurar Padrão'}</span>
           </button>
         </div>
       </div>

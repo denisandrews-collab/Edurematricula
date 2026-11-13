@@ -74,7 +74,11 @@ export interface Student {
   autentiqueSignerIp?: string;
   autentiqueCertHash?: string;
   autentiqueSigner1Status?: 'PENDENTE' | 'ASSINADO' | 'RECUSADO';
+  autentiqueSigner1SignedAt?: string;
+  autentiqueSigner1Ip?: string;
   autentiqueSigner2Status?: 'PENDENTE' | 'ASSINADO' | 'RECUSADO';
+  autentiqueSigner2SignedAt?: string;
+  autentiqueSigner2Ip?: string;
 
   // Itaú Integration fields
   itauPaymentType?: 'PIX' | 'BOLETO' | 'CREDIT_CARD' | 'DEBIT_CARD' | 'BOLETO_PARCELADO';
@@ -93,6 +97,9 @@ export interface Student {
   customInstallmentTiers?: InstallmentTier[];
 
   protocolNumber?: string;
+  lastReminderSentAt?: string;
+  reminderCount?: number;
+  customPortalPermissions?: PortalEditablePermissions;
   historyLogs: StudentHistoryLog[];
 }
 
@@ -159,6 +166,14 @@ export interface PortalEditablePermissions {
   allowStudentAcademic: boolean;
 }
 
+export interface ReminderEmailTemplate {
+  subject: string;
+  body: string;
+  sendToSecondResponsible: boolean;
+  autoIncludePortalLink: boolean;
+  lastUpdated?: string;
+}
+
 export interface IntegrationSettings {
   autentique: {
     apiKey: string;
@@ -188,6 +203,7 @@ export interface IntegrationSettings {
     pixDiscountPercent?: number;
   };
   portalPermissions?: PortalEditablePermissions;
+  reminderTemplate?: ReminderEmailTemplate;
 }
 
 export interface ColumnMapping {

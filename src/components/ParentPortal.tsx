@@ -12,7 +12,11 @@ import {
 import { apiService } from '../services/apiService';
 import { ParentDataCorrectionModal } from './ParentDataCorrectionModal';
 import { AutentiqueCertificateModal } from './AutentiqueCertificateModal';
+import { ContractDocumentViewer } from './ContractDocumentViewer';
+import { generateContractPdf } from '../utils/pdfGenerator';
 import { RedePaymentForm } from './RedePaymentForm';
+import { QRCodeSVG } from 'qrcode.react';
+import { AnimatePresence, motion } from 'motion/react';
 import confetti from 'canvas-confetti';
 import {
   GraduationCap,
@@ -71,19 +75,40 @@ export function ParentPortal({
   settings,
   onBackToAdmin,
 }: Props) {
-  // Security permissions configured by secretariat
-  const portalPermissions = settings?.portalPermissions || DEFAULT_PORTAL_PERMISSIONS;
+  // Security permissions configured by secretariat (Student-specific or global school settings)
+  const portalPermissions = student.customPortalPermissions || settings?.portalPermissions || DEFAULT_PORTAL_PERMISSIONS;
 
-  // Current active step in the re-enrollment wizard (1: Review, 2: Contract/Autentique, 3: Payment/Itaú, 4: Receipt)
-  const isSigned = student.status === 'assinado' || student.status === 'pagamento_pendente' || student.status === 'pago' || student.status === 'matricula_confirmada';
+  // Whether this student has a 2nd responsible registered
+  const hasSecondResponsible = Boolean(student.responsible2Name && student.responsible2Name.trim());
+
+  // Signer 1 (Responsável Principal) status:
+  const isSigner1Signed =
+    student.autentiqueSigner1Status === 'ASSINADO' ||
+    (student.status === 'assinado' && !student.autentiqueSigner1Status && !student.autentiqueSigner2Status) ||
+    student.status === 'pago' ||
+    student.status === 'matricula_confirmada';
+
+  // Signer 2 (Co-Responsável Solidário) status:
+  const isSigner2Signed =
+    !hasSecondResponsible ||
+    student.autentiqueSigner2Status === 'ASSINADO' ||
+    student.status === 'pago' ||
+    student.status === 'matricula_confirmada';
+
+  // Strict check: BOTH responsibles must have signed to unlock Step 3 (Payment)!
+  const isFullySigned = isSigner1Signed && isSigner2Signed;
+  const isPartiallySigned = hasSecondResponsible && (isSigner1Signed || isSigner2Signed) && !isFullySigned;
   const isPaid = student.status === 'pago' || student.status === 'matricula_confirmada';
 
+  // Backward compatibility alias for isSigned (true only when all required signers have signed)
+  const isSigned = isFullySigned;
+
   // Step 1 confirmed state
-  const [hasConfirmedStep1, setHasConfirmedStep1] = useState<boolean>(() => isSigned || isPaid);
+  const [hasConfirmedStep1, setHasConfirmedStep1] = useState<boolean>(() => isFullySigned || isPaid);
 
   const [currentStep, setCurrentStep] = useState<number>(() => {
     if (isPaid) return 4;
-    if (isSigned) return 3;
+    if (isFullySigned) return 3;
     return 1;
   });
 
@@ -93,17 +118,17 @@ export function ParentPortal({
     if (isPaid) {
       setCurrentStep(4);
       setHasConfirmedStep1(true);
-    } else if (isSigned) {
+    } else if (isFullySigned) {
       setHasConfirmedStep1(true);
       if (currentStep === 1 || currentStep === 2) setCurrentStep(3);
     }
-  }, [student.status, isSigned, isPaid]);
+  }, [student.status, isFullySigned, isPaid]);
 
   // Step access validation to enforce sequential completion
   const canAccessStep = (stepNum: number): boolean => {
     if (stepNum === 1) return true;
-    if (stepNum === 2) return hasConfirmedStep1 || isSigned || isPaid;
-    if (stepNum === 3) return isSigned || isPaid;
+    if (stepNum === 2) return hasConfirmedStep1 || isFullySigned || isPaid;
+    if (stepNum === 3) return isFullySigned || isPaid;
     if (stepNum === 4) return isPaid;
     return false;
   };
@@ -115,8 +140,16 @@ export function ParentPortal({
     if (!canAccessStep(stepNum)) {
       if (stepNum === 2 && !hasConfirmedStep1) {
         setPortalErrorMessage('Por favor, confira os dados cadastrais no Passo 1 e clique em "Confirmar Dados e Ir para o Contrato".');
-      } else if (stepNum === 3 && !isSigned) {
-        setPortalErrorMessage('Você precisa ler e assinar o contrato digitalmente no Passo 2 (via Autentique) antes de liberar a fase de pagamento.');
+      } else if (stepNum === 3 && !isFullySigned) {
+        if (hasSecondResponsible && isSigner1Signed && !isSigner2Signed) {
+          setPortalErrorMessage(`Acesso bloqueado ao Pagamento: O 1º Responsável (${student.responsibleName}) já assinou, mas é OBRIGATÓRIO que o 2º Responsável (${student.responsible2Name}) também assine para liberar o pagamento da rematrícula.`);
+        } else if (hasSecondResponsible && !isSigner1Signed && isSigner2Signed) {
+          setPortalErrorMessage(`Acesso bloqueado ao Pagamento: O 2º Responsável (${student.responsible2Name}) já assinou, mas é OBRIGATÓRIO que o 1º Responsável (${student.responsibleName}) também assine para liberar o pagamento da rematrícula.`);
+        } else if (hasSecondResponsible) {
+          setPortalErrorMessage(`Acesso bloqueado ao Pagamento: É OBRIGATÓRIO que ambos os responsáveis (${student.responsibleName} e ${student.responsible2Name}) assinem o contrato digitalmente.`);
+        } else {
+          setPortalErrorMessage('Você precisa ler e assinar o contrato digitalmente no Passo 2 (via Autentique) antes de liberar a fase de pagamento.');
+        }
       } else if (stepNum === 4 && !isPaid) {
         setPortalErrorMessage('O comprovante oficial e a vaga só são liberados após a confirmação do pagamento no Passo 3.');
       }
@@ -126,8 +159,35 @@ export function ParentPortal({
     setCurrentStep(stepNum);
   };
 
-  // Step 2: Signature state & Autentique Legal Integration
-  const [signerTypedName, setSignerTypedName] = useState(student.responsibleName);
+  // Step 2: Signature state & Dual Signer Management
+  const [activeSignerTab, setActiveSignerTab] = useState<'signer1' | 'signer2'>(() => {
+    if (isSigner1Signed && hasSecondResponsible && !isSigner2Signed) return 'signer2';
+    return 'signer1';
+  });
+
+  // Sync active signer tab if student or signature states change
+  useEffect(() => {
+    if (isSigner1Signed && hasSecondResponsible && !isSigner2Signed) {
+      setActiveSignerTab('signer2');
+    } else if (!isSigner1Signed) {
+      setActiveSignerTab('signer1');
+    }
+  }, [student.id, isSigner1Signed, isSigner2Signed, hasSecondResponsible]);
+
+  const activeSignerName = activeSignerTab === 'signer1' ? student.responsibleName : (student.responsible2Name || '');
+  const activeSignerCpf = activeSignerTab === 'signer1' ? student.responsibleCpf : (student.responsible2Cpf || '');
+  const activeSignerEmail = activeSignerTab === 'signer1' ? student.responsibleEmail : (student.responsible2Email || student.responsibleEmail);
+  const activeSignerPhone = activeSignerTab === 'signer1' ? student.responsiblePhone : (student.responsible2Phone || student.responsiblePhone);
+  const activeSignerRole = activeSignerTab === 'signer1' ? (student.responsibleKinship || '1º Responsável (Principal)') : (student.responsible2Kinship || '2º Responsável (Solidário)');
+
+  const [signerTypedName, setSignerTypedName] = useState(activeSignerName);
+
+  // Sync signer typed name when active signer tab changes
+  useEffect(() => {
+    setSignerTypedName(activeSignerName);
+    setAcceptedTerms(false);
+  }, [activeSignerTab, activeSignerName]);
+
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [isSigning, setIsSigning] = useState(false);
   const [signatureMode, setSignatureMode] = useState<'integrated' | 'external'>('integrated');
@@ -196,6 +256,13 @@ export function ParentPortal({
     }
   }, [currentStep]);
 
+  // Reset cached PIX/Boleto and step errors whenever active student changes
+  useEffect(() => {
+    setPixData(null);
+    setBoletoData(null);
+    setPortalErrorMessage(null);
+  }, [student.id]);
+
   // Load Rede PIX or Itaú Boleto data when on step 3
   useEffect(() => {
     if (currentStep === 3) {
@@ -213,18 +280,21 @@ export function ParentPortal({
             },
           })
           .then((res) => {
+            const copyPaste =
+              res.pix?.qrCode ||
+              `00020126580014br.gov.bcb.pix0136${student.id}520400005303986540${discountAmount.toFixed(2)}5802BR5925ESCOLA CRISTA MODELO ALPHA6009SAO PAULO62070503***6304ABCD`;
             setPixData({
-              copyPaste: res.pix?.qrCode || `00020126580014br.gov.bcb.pix0136${student.id}520400005303986540${discountAmount.toFixed(2)}5802BR5925ESCOLA CRISTA MODELO ALPHA6009SAO PAULO62070503***6304ABCD`,
-              qrCode: res.pix?.qrCodeImage || `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(res.pix?.qrCode || 'PIX_REDE')}`,
+              copyPaste,
+              qrCode: copyPaste,
               amount: discountAmount,
               tid: res.tid,
             });
           })
           .catch(() => {
-            // Fallback
+            const copyPaste = `00020126580014br.gov.bcb.pix0136rede-${student.id}520400005303986540${discountAmount.toFixed(2)}5802BR5925ESCOLA CRISTA MODELO ALPHA6009SAO PAULO62070503***6304ABCD`;
             setPixData({
-              copyPaste: `00020126580014br.gov.bcb.pix0136rede-${student.id}520400005303986540${discountAmount.toFixed(2)}5802BR5925ESCOLA CRISTA MODELO ALPHA6009SAO PAULO62070503***6304ABCD`,
-              qrCode: `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=PIX_REDE_${student.id}_${discountAmount.toFixed(2)}`,
+              copyPaste,
+              qrCode: copyPaste,
               amount: discountAmount,
               tid: 'tid_rede_pix_' + Math.floor(100000 + Math.random() * 900000),
             });
@@ -239,7 +309,7 @@ export function ParentPortal({
         });
       }
     }
-  }, [currentStep, paymentMethod, student, pixDiscountPercent, pixData, boletoData]);
+  }, [currentStep, paymentMethod, student.id, student.finalValue, pixDiscountPercent, pixData, boletoData]);
 
   // Generate or Resend OTP validation code
   const handleGenerateOtp = () => {
@@ -265,27 +335,31 @@ export function ParentPortal({
     try {
       const res = await apiService.getAutentiqueDocStatus(docId);
       if (res && res.document && res.document.status === 'SIGNED') {
+        const nowIso = res.document.signedAt || new Date().toISOString();
         const updated: Student = {
           ...student,
           status: 'assinado',
           autentiqueStatus: 'ASSINADO',
-          autentiqueSignedAt: res.document.signedAt || new Date().toISOString(),
+          autentiqueSignedAt: nowIso,
+          autentiqueSigner1Status: 'ASSINADO',
+          autentiqueSigner1SignedAt: nowIso,
+          autentiqueSigner2Status: hasSecondResponsible ? 'ASSINADO' : undefined,
+          autentiqueSigner2SignedAt: hasSecondResponsible ? nowIso : undefined,
           autentiqueSignerIp: res.document.ipAddress || '177.18.241.109',
           autentiqueCertHash: 'sha256_' + Math.random().toString(36).substring(2) + Math.random().toString(36).substring(2),
           historyLogs: [
             ...student.historyLogs,
             {
-              timestamp: new Date().toISOString(),
+              timestamp: nowIso,
               action: 'Sincronização com Autentique Concluída',
-              details: `Status verificado via API GraphQL: Assinatura confirmada por ${student.responsibleName}.`,
+              details: `Status verificado via API GraphQL: Assinatura de ambos os responsáveis confirmada com sucesso.`,
             },
           ],
         };
         onUpdateStudent(updated);
-        setSyncStatusFeedback('Contrato assinado detectado com sucesso na Autentique! Fase de pagamento liberada.');
+        setSyncStatusFeedback('Contrato homologado por ambos os responsáveis na Autentique! Fase de pagamento liberada.');
       } else {
-        // If pending, allow fast confirmation sync
-        setSyncStatusFeedback('Aguardando conclusão no site da Autentique. Assim que assinar lá, clique em Sincronizar novamente.');
+        setSyncStatusFeedback('Consulta concluída. Aguardando assinatura de todos os responsáveis no portal Autentique.');
       }
     } catch (err: any) {
       setSyncStatusFeedback('Consulta concluída. Aguardando assinatura no portal Autentique.');
@@ -294,45 +368,68 @@ export function ParentPortal({
     }
   };
 
-  // Simulate signing directly on Autentique portal link
-  const handleSimulateExternalSignature = async () => {
+  // Simulate signing directly on Autentique portal link (supports both or individual)
+  const handleSimulateExternalSignature = async (mode: 'both' | 'signer1' | 'signer2' = 'both') => {
     setIsSigning(true);
     setPortalErrorMessage(null);
     try {
       const docId = student.autentiqueDocId || 'autq_' + student.id;
-      const res = await apiService.signAutentiqueDoc(
-        docId,
-        student.responsibleName,
-        'Portal Web Autentique (Assinatura Eletrônica Externa)'
-      );
+      const nowIso = new Date().toISOString();
+      const ip = '177.18.241.109';
+      const hash = 'sha256_' + Math.random().toString(36).substring(2);
+
+      let newSigner1Status = student.autentiqueSigner1Status || (isSigner1Signed ? 'ASSINADO' : 'PENDENTE');
+      let newSigner2Status = student.autentiqueSigner2Status || (isSigner2Signed ? 'ASSINADO' : 'PENDENTE');
+
+      if (mode === 'signer1' || mode === 'both') {
+        newSigner1Status = 'ASSINADO';
+      }
+      if (mode === 'signer2' || mode === 'both') {
+        newSigner2Status = 'ASSINADO';
+      }
+
+      const willBeFullySigned = newSigner1Status === 'ASSINADO' && (!hasSecondResponsible || newSigner2Status === 'ASSINADO');
 
       const updated: Student = {
         ...student,
-        status: 'assinado',
-        autentiqueStatus: 'ASSINADO',
-        autentiqueSignedAt: res.signedAt || new Date().toISOString(),
-        autentiqueSignerIp: res.certificate?.ip || '177.18.241.109',
-        autentiqueCertHash: res.certificate?.authHash || 'sha256_' + Math.random().toString(36).substring(2),
+        status: willBeFullySigned ? 'assinado' : student.status,
+        autentiqueStatus: willBeFullySigned ? 'ASSINADO' : 'PENDENTE',
+        autentiqueSignedAt: willBeFullySigned ? nowIso : student.autentiqueSignedAt,
+        autentiqueSignerIp: ip,
+        autentiqueCertHash: hash,
+        autentiqueSigner1Status: newSigner1Status,
+        autentiqueSigner1SignedAt: newSigner1Status === 'ASSINADO' ? (student.autentiqueSigner1SignedAt || nowIso) : undefined,
+        autentiqueSigner1Ip: ip,
+        autentiqueSigner2Status: hasSecondResponsible ? newSigner2Status : undefined,
+        autentiqueSigner2SignedAt: newSigner2Status === 'ASSINADO' ? (student.autentiqueSigner2SignedAt || nowIso) : undefined,
+        autentiqueSigner2Ip: hasSecondResponsible ? ip : undefined,
         historyLogs: [
           ...student.historyLogs,
           {
-            timestamp: new Date().toISOString(),
-            action: 'Contrato Assinado no Portal Web da Autentique',
-            details: `Assinatura externa homologada via Webhook Autentique por ${student.responsibleName} (CPF: ${student.responsibleCpf}).`,
+            timestamp: nowIso,
+            action: `Contrato Assinado via Autentique (${mode === 'both' ? 'Ambos os Responsáveis' : mode === 'signer1' ? '1º Responsável' : '2º Responsável'})`,
+            details: willBeFullySigned
+              ? 'Todos os 2 responsáveis assinaram o contrato! Fase de pagamento liberada.'
+              : 'Assinatura registrada. Aguardando assinatura do outro responsável.',
           },
         ],
       };
 
       onUpdateStudent(updated);
       setIsSigning(false);
-      setSyncStatusFeedback('Assinatura registrada com sucesso no portal Autentique!');
+
+      if (willBeFullySigned) {
+        setSyncStatusFeedback('Assinaturas homologadas com sucesso! Fase de pagamento desbloqueada.');
+      } else {
+        setSyncStatusFeedback(`Assinatura registrada! Aguardando o ${mode === 'signer1' ? '2º Responsável' : '1º Responsável'} assinar.`);
+      }
     } catch (e: any) {
       setPortalErrorMessage('Erro ao sincronizar com Autentique: ' + e.message);
       setIsSigning(false);
     }
   };
 
-  // Handle Autentique Signature (Embedded / Integrated with legal validation)
+  // Handle Autentique Signature (Embedded / Integrated with legal validation for the ACTIVE signer)
   const handleConfirmSignature = async () => {
     setPortalErrorMessage(null);
     if (!acceptedTerms) {
@@ -354,29 +451,58 @@ export function ParentPortal({
       const res = await apiService.signAutentiqueDoc(
         docId,
         signerTypedName,
-        `E-mail (${student.responsibleEmail}) + CPF (${student.responsibleCpf}) + Token OTP (${otpCode}) + IP`
+        `Signatário: ${activeSignerName} (${activeSignerRole}) • E-mail (${activeSignerEmail}) • CPF (${activeSignerCpf}) • Token OTP (${otpCode}) • IP`
       );
+
+      const nowIso = res.signedAt || new Date().toISOString();
+      const signerIp = res.certificate?.ip || '177.18.241.109';
+      const certHash = res.certificate?.authHash || 'sha256_' + Math.random().toString(36).substring(2);
+
+      const willBeSigner1Signed = activeSignerTab === 'signer1' ? true : isSigner1Signed;
+      const willBeSigner2Signed = activeSignerTab === 'signer2' ? true : (!hasSecondResponsible || isSigner2Signed);
+      const willBeFullySigned = willBeSigner1Signed && willBeSigner2Signed;
 
       const updated: Student = {
         ...student,
-        status: 'assinado',
-        autentiqueStatus: 'ASSINADO',
-        autentiqueSignedAt: res.signedAt || new Date().toISOString(),
-        autentiqueSignerIp: res.certificate?.ip || '177.18.241.109',
-        autentiqueCertHash: res.certificate?.authHash || 'sha256_' + Math.random().toString(36).substring(2),
+        status: willBeFullySigned ? 'assinado' : student.status,
+        autentiqueStatus: willBeFullySigned ? 'ASSINADO' : 'PENDENTE',
+        autentiqueSignedAt: willBeFullySigned ? nowIso : student.autentiqueSignedAt,
+        autentiqueSignerIp: signerIp,
+        autentiqueCertHash: certHash,
+        autentiqueSigner1Status: willBeSigner1Signed ? 'ASSINADO' : 'PENDENTE',
+        autentiqueSigner1SignedAt: activeSignerTab === 'signer1' ? nowIso : student.autentiqueSigner1SignedAt,
+        autentiqueSigner1Ip: activeSignerTab === 'signer1' ? signerIp : student.autentiqueSigner1Ip,
+        autentiqueSigner2Status: hasSecondResponsible ? (willBeSigner2Signed ? 'ASSINADO' : 'PENDENTE') : undefined,
+        autentiqueSigner2SignedAt: activeSignerTab === 'signer2' ? nowIso : student.autentiqueSigner2SignedAt,
+        autentiqueSigner2Ip: activeSignerTab === 'signer2' ? signerIp : student.autentiqueSigner2Ip,
         historyLogs: [
           ...student.historyLogs,
           {
-            timestamp: new Date().toISOString(),
-            action: 'Contrato Assinado Digitalmente (API Autentique)',
-            details: `Assinado por ${signerTypedName} (CPF: ${student.responsibleCpf}, OTP: ${otpCode}). Homologado nos termos da MP 2.200-2/2001 e Lei 14.063/2020.`,
+            timestamp: nowIso,
+            action: `Contrato Assinado Digitalmente por ${activeSignerName} (${activeSignerRole})`,
+            details: `Assinatura confirmada por ${signerTypedName} (CPF: ${activeSignerCpf}, OTP: ${otpCode}). ${
+              willBeFullySigned
+                ? 'Todos os 2 responsáveis assinaram o contrato! Fase de pagamento liberada.'
+                : `1 de 2 assinaturas concluídas. Aguardando assinatura do 2º Responsável (${student.responsible2Name}) para liberar o pagamento.`
+            }`,
           },
         ],
       };
 
       onUpdateStudent(updated);
       setIsSigning(false);
-      setCurrentStep(3);
+
+      if (willBeFullySigned) {
+        // Both signed! Proceed to Step 3
+        setCurrentStep(3);
+      } else {
+        // Switch to the pending 2nd signer tab so they can sign immediately
+        setActiveSignerTab('signer2');
+        setAcceptedTerms(false);
+        setSyncStatusFeedback(
+          `1ª Assinatura concluída com sucesso! Agora o 2º Responsável (${student.responsible2Name}) deve assinar abaixo para liberar o pagamento da rematrícula.`
+        );
+      }
     } catch (e: any) {
       setPortalErrorMessage('Erro na assinatura: ' + e.message);
       setIsSigning(false);
@@ -624,10 +750,7 @@ export function ParentPortal({
         <div className="grid grid-cols-4 gap-2.5 text-center text-xs font-semibold">
           {/* Step 1 */}
           <div
-            onClick={() => {
-              setPortalErrorMessage(null);
-              setCurrentStep(1);
-            }}
+            onClick={() => handleStepNavigation(1)}
             className={`p-3 rounded-xl cursor-pointer transition flex flex-col items-center gap-1 ${
               currentStep === 1
                 ? 'bg-indigo-600 text-white shadow-xs'
@@ -643,56 +766,65 @@ export function ParentPortal({
 
           {/* Step 2 */}
           <div
-            onClick={() => {
-              setPortalErrorMessage(null);
-              setCurrentStep(2);
-            }}
+            onClick={() => handleStepNavigation(2)}
             className={`p-3 rounded-xl cursor-pointer transition flex flex-col items-center gap-1 ${
               currentStep === 2
                 ? 'bg-indigo-600 text-white shadow-xs'
-                : isSigned
+                : isFullySigned
                 ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                : isPartiallySigned
+                ? 'bg-amber-50 text-amber-800 border border-amber-300'
                 : 'bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200/60'
             }`}
           >
             <div className="flex items-center gap-1.5">
               <ShieldCheck className="w-3.5 h-3.5" />
               <span>2. Contrato</span>
-              {isSigned && <Check className="w-3 h-3 text-emerald-600" />}
+              {isFullySigned ? (
+                <Check className="w-3 h-3 text-emerald-600" />
+              ) : isPartiallySigned ? (
+                <Clock className="w-3 h-3 text-amber-600" />
+              ) : null}
             </div>
-            <span className="text-[10px] opacity-80 hidden sm:inline">API Autentique</span>
+            <span className="text-[10px] opacity-80 hidden sm:inline">
+              {isFullySigned
+                ? (hasSecondResponsible ? '2/2 Assinados' : 'Assinado')
+                : isPartiallySigned
+                ? '1/2 Assinado'
+                : 'Autentique'}
+            </span>
           </div>
 
           {/* Step 3 */}
           <div
-            onClick={() => {
-              setPortalErrorMessage(null);
-              setCurrentStep(3);
-            }}
+            onClick={() => handleStepNavigation(3)}
             className={`p-3 rounded-xl cursor-pointer transition flex flex-col items-center gap-1 ${
               currentStep === 3
                 ? 'bg-indigo-600 text-white shadow-xs'
                 : isPaid
                 ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-                : isSigned
+                : isFullySigned
                 ? 'bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200/60'
-                : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200/60'
+                : 'bg-slate-50/60 text-slate-400 hover:bg-slate-100/80 border border-slate-200/50 cursor-not-allowed opacity-80'
             }`}
           >
             <div className="flex items-center gap-1.5">
-              <CreditCard className="w-3.5 h-3.5" />
+              {!isFullySigned && !isPaid ? (
+                <Lock className="w-3.5 h-3.5 text-slate-400" />
+              ) : (
+                <CreditCard className="w-3.5 h-3.5" />
+              )}
               <span>3. Pagamento</span>
               {isPaid && <Check className="w-3 h-3 text-emerald-600" />}
             </div>
-            <span className="text-[10px] opacity-80 hidden sm:inline">API Itaú</span>
+            <span className="text-[10px] opacity-80 hidden sm:inline">
+              {isFullySigned || isPaid ? 'API Itaú' : hasSecondResponsible ? 'Bloqueado (Requer 2 assinaturas)' : 'Bloqueado (Requer assinatura)'}
+            </span>
           </div>
 
           {/* Step 4 */}
           <div
-            onClick={() => {
-              setPortalErrorMessage(null);
-              setCurrentStep(4);
-            }}
+            onClick={() => handleStepNavigation(4)}
             className={`p-3 rounded-xl cursor-pointer transition flex flex-col items-center gap-1 ${
               currentStep === 4
                 ? 'bg-emerald-600 text-white shadow-xs'
@@ -727,6 +859,14 @@ export function ParentPortal({
         </div>
       )}
 
+      <AnimatePresence mode="wait">
+        <motion.div
+          key={currentStep}
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -6 }}
+          transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
+        >
       {/* ================= STEP 1: CONFERÊNCIA DE DADOS ================= */}
       {currentStep === 1 && (
         <div className="bg-white rounded-2xl p-6 sm:p-8 border border-slate-200 shadow-xs space-y-6">
@@ -1005,85 +1145,186 @@ export function ParentPortal({
               </h2>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
-              <div className="bg-emerald-50 text-emerald-800 px-3 py-1 rounded-full text-xs font-semibold border border-emerald-200 flex items-center gap-1.5 shadow-2xs">
+              <div className="bg-emerald-50 text-emerald-800 px-3 py-1.5 rounded-xl text-xs font-semibold border border-emerald-200 flex items-center gap-1.5 shadow-2xs">
                 <Shield className="w-3.5 h-3.5 text-emerald-600" />
                 <span>MP 2.200-2/2001 & Lei 14.063/2020</span>
               </div>
               <button
                 type="button"
+                onClick={() => generateContractPdf(student, template, dynamicContractText)}
+                className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition shadow-xs cursor-pointer"
+                title="Baixar Contrato Oficial em formato PDF"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Baixar Contrato em PDF</span>
+              </button>
+              <button
+                type="button"
                 onClick={() => window.print()}
-                className="px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition border border-slate-200 cursor-pointer"
-                title="Imprimir ou Salvar Minuta em PDF"
+                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition border border-slate-200 cursor-pointer"
+                title="Imprimir ou Salvar Minuta"
               >
                 <Printer className="w-3.5 h-3.5 text-slate-600" />
-                <span>Imprimir Minuta</span>
+                <span>Imprimir</span>
               </button>
             </div>
           </div>
 
-          {/* Institutional School Letterhead & Document Preview */}
-          <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-xs bg-slate-50/50">
-            {/* School Letterhead */}
-            <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="flex items-center gap-3.5">
-                <div className="w-12 h-12 rounded-xl bg-white/10 border border-white/20 flex items-center justify-center shrink-0 shadow-inner">
-                  <GraduationCap className="w-6 h-6 text-indigo-300" />
-                </div>
+          {/* Institutional Executive Contract Document Viewer with Paper Simulation & Controls */}
+          <ContractDocumentViewer
+            student={student}
+            template={template}
+            rawContractText={dynamicContractText}
+            isSigned={isFullySigned}
+            isSigner1Signed={isSigner1Signed}
+            isSigner2Signed={isSigner2Signed}
+          />
+
+          {/* DUAL SIGNERS PROGRESS BANNER (when student has 2 responsibles) */}
+          {hasSecondResponsible && (
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 space-y-3.5 shadow-2xs">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-2.5">
                 <div>
-                  <h3 className="font-bold text-base tracking-tight text-white uppercase">
-                    {template.schoolName}
+                  <h3 className="font-bold text-xs uppercase tracking-wider text-slate-800 flex items-center gap-1.5">
+                    <User className="w-4 h-4 text-indigo-600" />
+                    <span>Assinaturas Obrigatórias da Rematrícula (2 de 2 necessárias)</span>
                   </h3>
-                  <div className="text-xs text-slate-300 flex items-center gap-2 flex-wrap mt-0.5">
-                    <span>CNPJ: {template.schoolCnpj}</span>
-                    <span>•</span>
-                    <span>Reconhecimento Oficial MEC / CEE</span>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Para liberação da próxima fase (Pagamento e Vaga), é <strong>obrigatório</strong> que ambos os responsáveis assinem digitalmente.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`px-2.5 py-1 rounded-full text-xs font-bold border flex items-center gap-1.5 ${
+                      isFullySigned
+                        ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                        : isPartiallySigned
+                        ? 'bg-amber-100 text-amber-900 border-amber-300'
+                        : 'bg-slate-200 text-slate-700 border-slate-300'
+                    }`}
+                  >
+                    {isFullySigned ? (
+                      <>
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>2 de 2 Assinados</span>
+                      </>
+                    ) : isPartiallySigned ? (
+                      <>
+                        <Clock className="w-3.5 h-3.5 text-amber-600" />
+                        <span>1 de 2 Assinado (Falta 1)</span>
+                      </>
+                    ) : (
+                      <>
+                        <Lock className="w-3.5 h-3.5 text-slate-500" />
+                        <span>0 de 2 Assinados</span>
+                      </>
+                    )}
+                  </span>
+                </div>
+              </div>
+
+              {/* Grid of the 2 signers */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                {/* 1º Responsável */}
+                <div
+                  className={`p-3.5 rounded-xl border transition flex flex-col justify-between ${
+                    isSigner1Signed
+                      ? 'bg-emerald-50/70 border-emerald-300'
+                      : activeSignerTab === 'signer1'
+                      ? 'bg-white border-indigo-400 ring-2 ring-indigo-200 shadow-xs'
+                      : 'bg-white border-slate-200'
+                  }`}
+                >
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                        1º Responsável (Principal)
+                      </span>
+                      {isSigner1Signed ? (
+                        <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded text-[10px] font-bold flex items-center gap-1 border border-emerald-200">
+                          <Check className="w-3 h-3 text-emerald-600" />
+                          <span>Assinado</span>
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 bg-amber-100 text-amber-800 rounded text-[10px] font-bold border border-amber-200">
+                          Pendente
+                        </span>
+                      )}
+                    </div>
+                    <div className="font-bold text-slate-900 text-sm">{student.responsibleName}</div>
+                    <div className="text-[11px] text-slate-500 font-mono">CPF: {formatCpf(student.responsibleCpf)}</div>
+                    <div className="text-[10px] text-slate-400 truncate">{student.responsibleEmail}</div>
                   </div>
+
+                  {!isSigner1Signed && activeSignerTab !== 'signer1' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveSignerTab('signer1');
+                        setAcceptedTerms(false);
+                      }}
+                      className="mt-3 w-full py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-lg text-xs transition border border-indigo-200 cursor-pointer"
+                    >
+                      Assinar como 1º Responsável
+                    </button>
+                  )}
+                </div>
+
+                {/* 2º Responsável */}
+                <div
+                  className={`p-3.5 rounded-xl border transition flex flex-col justify-between ${
+                    isSigner2Signed
+                      ? 'bg-emerald-50/70 border-emerald-300'
+                      : activeSignerTab === 'signer2'
+                      ? 'bg-white border-indigo-400 ring-2 ring-indigo-200 shadow-xs'
+                      : 'bg-white border-slate-200'
+                  }`}
+                >
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                        2º Responsável (Solidário)
+                      </span>
+                      {isSigner2Signed ? (
+                        <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded text-[10px] font-bold flex items-center gap-1 border border-emerald-200">
+                          <Check className="w-3 h-3 text-emerald-600" />
+                          <span>Assinado</span>
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 bg-amber-100 text-amber-800 rounded text-[10px] font-bold border border-amber-200">
+                          Pendente
+                        </span>
+                      )}
+                    </div>
+                    <div className="font-bold text-slate-900 text-sm">{student.responsible2Name}</div>
+                    <div className="text-[11px] text-slate-500 font-mono">
+                      CPF: {formatCpf(student.responsible2Cpf || '')}
+                    </div>
+                    <div className="text-[10px] text-slate-400 truncate">
+                      {student.responsible2Email || student.responsibleEmail}
+                    </div>
+                  </div>
+
+                  {!isSigner2Signed && activeSignerTab !== 'signer2' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveSignerTab('signer2');
+                        setAcceptedTerms(false);
+                      }}
+                      className="mt-3 w-full py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-lg text-xs transition border border-indigo-200 cursor-pointer"
+                    >
+                      Assinar como 2º Responsável
+                    </button>
+                  )}
                 </div>
               </div>
-              <div className="text-left sm:text-right text-xs text-slate-300 border-t sm:border-t-0 pt-2 sm:pt-0 border-white/10 space-y-0.5">
-                <div>
-                  Protocolo: <strong className="text-white font-mono">{student.protocolNumber || 'REM-2026-001'}</strong>
-                </div>
-                <div>
-                  Doc ID Autentique: <strong className="text-emerald-400 font-mono text-[11px]">{student.autentiqueDocId || 'autq_' + student.id}</strong>
-                </div>
-              </div>
             </div>
-
-            {/* Document Details Strip */}
-            <div className="bg-slate-100/90 px-5 py-2.5 text-xs text-slate-700 flex flex-wrap justify-between items-center gap-2 border-b border-slate-200">
-              <span className="font-semibold text-slate-800">
-                Instrumento Particular de Prestação de Serviços Educacionais • Ano Letivo {template.academicYear}
-              </span>
-              <div className="flex items-center gap-3 text-slate-600 text-[11px]">
-                <span>Beneficiário: <strong className="text-slate-900">{student.name}</strong> ({student.serie})</span>
-                <span>•</span>
-                <span>Responsável: <strong className="text-slate-900">{student.responsibleName}</strong></span>
-              </div>
-            </div>
-
-            {/* Document Paper Container */}
-            <div className="p-6 sm:p-8 max-h-[380px] overflow-y-auto font-serif text-xs text-slate-800 leading-relaxed bg-white border-b border-slate-200 selection:bg-indigo-100 whitespace-pre-line shadow-inner">
-              {dynamicContractText}
-            </div>
-
-            {/* Document Footer Bar */}
-            <div className="px-5 py-3 bg-slate-50 text-[11px] text-slate-600 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
-              <div className="flex items-center gap-2 text-slate-500">
-                <FileCheck className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span>
-                  Texto gerado dinamicamente com dados homologados pela secretaria. Válido e exequível como Título Executivo Extrajudicial (Art. 784, III, CPC).
-                </span>
-              </div>
-              <span className="text-slate-400 font-mono text-[10px]">
-                Hash Provisório: sha256_minuta_{student.id.slice(0, 8)}
-              </span>
-            </div>
-          </div>
+          )}
 
           {/* Signature Action Section */}
-          {isSigned ? (
-            /* ================= STATE: ALREADY SIGNED ================= */
+          {isFullySigned ? (
+            /* ================= STATE: ALL REQUIRED RESPONSABLES HAVE SIGNED ================= */
             <div className="bg-gradient-to-br from-emerald-50 via-teal-50 to-emerald-50 border border-emerald-300 rounded-2xl p-6 text-xs text-emerald-950 space-y-4 shadow-sm animate-fade-in">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-emerald-200 pb-3">
                 <div className="flex items-center gap-3">
@@ -1092,41 +1333,46 @@ export function ParentPortal({
                   </div>
                   <div>
                     <h3 className="font-bold text-base text-emerald-900">
-                      Contrato Digital Homologado e Assinado via Autentique!
+                      Contrato Digital 100% Homologado por Ambos os Responsáveis!
                     </h3>
                     <p className="text-emerald-700 text-xs">
-                      Assinatura com plena validade jurídica perante todos os efeitos legais (MP 2.200-2/2001 e Lei 14.063/2020).
+                      {hasSecondResponsible
+                        ? `Assinaturas de ${student.responsibleName} e ${student.responsible2Name} confirmadas via Autentique.`
+                        : `Assinatura de ${student.responsibleName} confirmada via Autentique.`}
+                      {' '}Plena eficácia executiva nos termos da MP 2.200-2/2001 e Lei 14.063/2020.
                     </p>
                   </div>
                 </div>
                 <span className="px-3 py-1 bg-emerald-100 text-emerald-900 rounded-full font-bold text-xs border border-emerald-300 self-start sm:self-auto flex items-center gap-1">
                   <Award className="w-3.5 h-3.5 text-emerald-700" />
-                  <span>Certificado Ativo</span>
+                  <span>{hasSecondResponsible ? '2/2 Assinados' : 'Certificado Ativo'}</span>
                 </span>
               </div>
 
-              {/* Dossier Summary Cards */}
+              {/* Dossier Summary Cards for both signers */}
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 bg-white/80 p-4 rounded-xl border border-emerald-200/80 text-[11px]">
                 <div>
-                  <span className="text-slate-500 block">Signatário Confirmado:</span>
+                  <span className="text-slate-500 block">1º Signatário (Principal):</span>
                   <strong className="text-slate-900 font-semibold">{student.responsibleName}</strong>
                   <div className="text-slate-600 font-mono text-[10px]">CPF: {formatCpf(student.responsibleCpf)}</div>
                 </div>
 
+                {hasSecondResponsible && (
+                  <div>
+                    <span className="text-slate-500 block">2º Signatário (Solidário):</span>
+                    <strong className="text-slate-900 font-semibold">{student.responsible2Name}</strong>
+                    <div className="text-slate-600 font-mono text-[10px]">CPF: {formatCpf(student.responsible2Cpf || '')}</div>
+                  </div>
+                )}
+
                 <div>
-                  <span className="text-slate-500 block">Data e Hora do Carimbo:</span>
+                  <span className="text-slate-500 block">Data do Carimbo Oficial:</span>
                   <strong className="text-slate-900 font-semibold">
                     {student.autentiqueSignedAt
                       ? new Date(student.autentiqueSignedAt).toLocaleString('pt-BR')
                       : '14/08/2026 14:32:10'}
                   </strong>
                   <div className="text-emerald-700 text-[10px]">Horário de Brasília (BRT)</div>
-                </div>
-
-                <div>
-                  <span className="text-slate-500 block">Endereço IP Registrado:</span>
-                  <strong className="text-slate-900 font-mono">{student.autentiqueSignerIp || '177.18.241.109'}</strong>
-                  <div className="text-slate-500 text-[10px]">Geolocalização Brasil</div>
                 </div>
 
                 <div>
@@ -1159,8 +1405,76 @@ export function ParentPortal({
               </div>
             </div>
           ) : (
-            /* ================= STATE: PENDING SIGNATURE ================= */
+            /* ================= STATE: PENDING SIGNATURE OF ONE OR BOTH ================= */
             <div className="space-y-4">
+              {/* Notice when only 1 of 2 signed */}
+              {isPartiallySigned && (
+                <div className="bg-amber-50 border border-amber-300 p-4 rounded-2xl text-xs text-amber-950 flex items-start gap-3 shadow-xs animate-fade-in">
+                  <div className="w-7 h-7 rounded-lg bg-amber-500 text-white flex items-center justify-center shrink-0 font-black text-xs">
+                    !
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-amber-900 text-sm">
+                      Atenção: Falta a assinatura do {activeSignerTab === 'signer2' ? '2º Responsável' : '1º Responsável'}!
+                    </h4>
+                    <p className="text-amber-800 text-xs mt-0.5 leading-relaxed">
+                      O {isSigner1Signed ? `1º Responsável (${student.responsibleName})` : `2º Responsável (${student.responsible2Name})`} já assinou com sucesso.
+                      Porém, para garantir a validade jurídica integral e <strong>liberar a fase de pagamento</strong>, o{' '}
+                      <strong>{activeSignerName}</strong> precisa assinar abaixo.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Signer Switcher Tabs (if 2 responsibles) */}
+              {hasSecondResponsible && (
+                <div className="bg-slate-100 p-1.5 rounded-xl flex gap-1.5 text-xs font-bold">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveSignerTab('signer1');
+                      setAcceptedTerms(false);
+                    }}
+                    className={`flex-1 py-2 px-3 rounded-lg transition flex items-center justify-center gap-2 cursor-pointer ${
+                      activeSignerTab === 'signer1'
+                        ? 'bg-white text-indigo-950 shadow-xs border border-slate-200'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <User className="w-3.5 h-3.5" />
+                    <span>Assinar como 1º Responsável ({student.responsibleName})</span>
+                    {isSigner1Signed && (
+                      <span className="bg-emerald-100 text-emerald-800 text-[10px] px-1.5 py-0.2 rounded font-black flex items-center gap-0.5">
+                        <Check className="w-2.5 h-2.5" />
+                        Assinado
+                      </span>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveSignerTab('signer2');
+                      setAcceptedTerms(false);
+                    }}
+                    className={`flex-1 py-2 px-3 rounded-lg transition flex items-center justify-center gap-2 cursor-pointer ${
+                      activeSignerTab === 'signer2'
+                        ? 'bg-white text-indigo-950 shadow-xs border border-slate-200'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <User className="w-3.5 h-3.5" />
+                    <span>Assinar como 2º Responsável ({student.responsible2Name})</span>
+                    {isSigner2Signed && (
+                      <span className="bg-emerald-100 text-emerald-800 text-[10px] px-1.5 py-0.2 rounded font-black flex items-center gap-0.5">
+                        <Check className="w-2.5 h-2.5" />
+                        Assinado
+                      </span>
+                    )}
+                  </button>
+                </div>
+              )}
+
               {/* Method Selection Tabs */}
               <div className="flex rounded-xl bg-slate-100 p-1 text-xs font-semibold">
                 <button
@@ -1196,14 +1510,25 @@ export function ParentPortal({
               {/* MODE 1: INTEGRATED SIGNATURE */}
               {signatureMode === 'integrated' && (
                 <div className="bg-slate-50 border border-slate-200 rounded-2xl p-6 space-y-5 animate-fade-in">
-                  <div>
-                    <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
-                      <ShieldCheck className="w-5 h-5 text-emerald-600" />
-                      <span>Formalização e Assinatura Digital do Contrato</span>
-                    </h3>
-                    <p className="text-slate-600 text-xs mt-0.5">
-                      Confirme os dados do signatário e o código de autenticação para gerar o certificado com carimbo do tempo.
-                    </p>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+                        <ShieldCheck className="w-5 h-5 text-emerald-600" />
+                        <span>
+                          Assinando como: <strong className="text-indigo-900">{activeSignerName}</strong> ({activeSignerRole})
+                        </span>
+                      </h3>
+                      <p className="text-slate-600 text-xs mt-0.5">
+                        Confirme os dados do signatário e o código de autenticação para registrar a assinatura eletrônica oficial.
+                      </p>
+                    </div>
+
+                    {((activeSignerTab === 'signer1' && isSigner1Signed) || (activeSignerTab === 'signer2' && isSigner2Signed)) && (
+                      <span className="px-3 py-1 bg-emerald-100 text-emerald-800 rounded-full font-bold text-xs flex items-center gap-1 border border-emerald-300">
+                        <Check className="w-3.5 h-3.5 text-emerald-700" />
+                        <span>Já Assinado por este Responsável</span>
+                      </span>
+                    )}
                   </div>
 
                   {/* Signer Data & OTP Grid */}
@@ -1223,13 +1548,13 @@ export function ParentPortal({
 
                     <div>
                       <label className="block font-semibold text-slate-700 mb-1 flex items-center justify-between">
-                        <span>CPF do Responsável Legal</span>
+                        <span>CPF do Signatário</span>
                         <span className="text-[10px] text-slate-400 font-normal">Identificação ICP</span>
                       </label>
                       <input
                         type="text"
                         disabled
-                        value={formatCpf(student.responsibleCpf)}
+                        value={formatCpf(activeSignerCpf)}
                         className="w-full px-3 py-2 border border-slate-200 rounded-xl bg-slate-100 text-slate-600 font-mono"
                       />
                     </div>
@@ -1261,7 +1586,7 @@ export function ParentPortal({
                       {otpSentFeedback && (
                         <div className="text-[10px] text-emerald-700 font-semibold mt-1 flex items-center gap-1">
                           <Check className="w-3 h-3" />
-                          <span>Novo código enviado com sucesso ao e-mail {student.responsibleEmail}</span>
+                          <span>Novo código enviado com sucesso ao e-mail {activeSignerEmail}</span>
                         </div>
                       )}
                     </div>
@@ -1277,7 +1602,7 @@ export function ParentPortal({
                         className="mt-1 w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 cursor-pointer"
                       />
                       <span className="leading-relaxed">
-                        Declaro expressamente que sou o responsável financeiro pelo aluno <strong>{student.name}</strong>, li e concordo na íntegra com todas as cláusulas do <strong>Contrato de Prestação de Serviços Educacionais {template.academicYear}</strong>, aceitando as obrigações financeiras, pedagógicas e regulamentares aqui descritas. Concordo com a emissão do <strong>Certificado Digital de Assinatura via Plataforma Autentique</strong>, conferindo a este documento plena eficácia executiva nos termos da <strong>Medida Provisória nº 2.200-2/2001</strong> e da <strong>Lei Federal nº 14.063/2020</strong>.
+                        Eu, <strong>{activeSignerName}</strong> ({activeSignerRole}), declaro expressamente que li e concordo na íntegra com todas as cláusulas do <strong>Contrato de Prestação de Serviços Educacionais {template.academicYear}</strong> em favor do aluno <strong>{student.name}</strong>, assumindo as responsabilidades financeiras e pedagógicas de forma solidária. Concordo com a emissão do <strong>Certificado Digital de Assinatura via Plataforma Autentique</strong>, nos termos da <strong>MP nº 2.200-2/2001</strong> e da <strong>Lei nº 14.063/2020</strong>.
                       </span>
                     </label>
                   </div>
@@ -1292,15 +1617,21 @@ export function ParentPortal({
                       ← Voltar à conferência dos dados
                     </button>
 
-                    <button
-                      id="btn-sign-contract-autentique"
-                      onClick={handleConfirmSignature}
-                      disabled={isSigning || !acceptedTerms}
-                      className="w-full sm:w-auto px-7 py-3.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold rounded-xl text-xs flex items-center justify-center space-x-2 transition shadow-sm cursor-pointer"
-                    >
-                      <ShieldCheck className="w-4.5 h-4.5" />
-                      <span>{isSigning ? 'Processando e Assinando via API Autentique...' : 'Assinar Contrato Digitalmente via Autentique'}</span>
-                    </button>
+                    <div className="flex items-center gap-2 w-full sm:w-auto">
+                      <button
+                        id="btn-sign-contract-autentique"
+                        onClick={handleConfirmSignature}
+                        disabled={isSigning || !acceptedTerms}
+                        className="w-full sm:w-auto px-7 py-3.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold rounded-xl text-xs flex items-center justify-center space-x-2 transition shadow-sm cursor-pointer"
+                      >
+                        <ShieldCheck className="w-4.5 h-4.5" />
+                        <span>
+                          {isSigning
+                            ? 'Processando assinatura...'
+                            : `Assinar Contrato como ${activeSignerTab === 'signer1' ? '1º Responsável' : '2º Responsável'}`}
+                        </span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
@@ -1317,7 +1648,7 @@ export function ParentPortal({
                         Assinatura Direta pelo Portal Web da Autentique
                       </h3>
                       <p className="text-slate-600 text-xs mt-0.5">
-                        Caso prefira, você pode assinar diretamente pela interface web da Autentique (painel.autentique.com.br). Siga os 2 passos abaixo:
+                        Caso os responsáveis prefiram assinar pelo portal web externo da Autentique (painel.autentique.com.br), use os botões abaixo:
                       </p>
                     </div>
                   </div>
@@ -1331,22 +1662,56 @@ export function ParentPortal({
                           <span>Abrir Contrato na Autentique</span>
                         </span>
                         <p className="text-slate-600 text-[11px] mt-1">
-                          Acesse o ambiente oficial da Autentique para visualizar a minuta e assinar com seu certificado ou e-mail.
+                          Acesse o link do documento gerado para esta rematrícula na plataforma Autentique.
                         </p>
                         <div className="mt-2 p-2 bg-slate-50 rounded-lg border border-slate-200 font-mono text-[10px] text-slate-600 break-all">
                           https://painel.autentique.com.br/documentos/{student.autentiqueDocId || 'doc_2026'}
                         </div>
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={handleSimulateExternalSignature}
-                        disabled={isSigning}
-                        className="w-full px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
-                      >
-                        <ExternalLink className="w-3.5 h-3.5" />
-                        <span>Abrir e Assinar no Site da Autentique ↗</span>
-                      </button>
+                      <div className="space-y-1.5 pt-2">
+                        {hasSecondResponsible ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => handleSimulateExternalSignature('signer1')}
+                              disabled={isSigning}
+                              className="w-full px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold rounded-lg text-[11px] flex items-center justify-center gap-1.5 transition cursor-pointer"
+                            >
+                              <span>Assinar como 1º Resp. ({student.responsibleName})</span>
+                              {isSigner1Signed && <Check className="w-3 h-3 text-emerald-600" />}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleSimulateExternalSignature('signer2')}
+                              disabled={isSigning}
+                              className="w-full px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold rounded-lg text-[11px] flex items-center justify-center gap-1.5 transition cursor-pointer"
+                            >
+                              <span>Assinar como 2º Resp. ({student.responsible2Name})</span>
+                              {isSigner2Signed && <Check className="w-3 h-3 text-emerald-600" />}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleSimulateExternalSignature('both')}
+                              disabled={isSigning}
+                              className="w-full px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition cursor-pointer shadow-xs"
+                            >
+                              <ExternalLink className="w-3.5 h-3.5" />
+                              <span>Simular Assinatura de Ambos os Responsáveis</span>
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleSimulateExternalSignature('both')}
+                            disabled={isSigning}
+                            className="w-full px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                            <span>Abrir e Assinar no Site da Autentique ↗</span>
+                          </button>
+                        )}
+                      </div>
                     </div>
 
                     {/* Step B */}
@@ -1357,7 +1722,7 @@ export function ParentPortal({
                           <span>Sincronizar Status com a Secretaria</span>
                         </span>
                         <p className="text-slate-600 text-[11px] mt-1">
-                          Após assinar na página da Autentique, clique no botão abaixo para verificar a assinatura em tempo real via API.
+                          Após ambos assinarem na página da Autentique, clique no botão abaixo para verificar a assinatura em tempo real via API.
                         </p>
                       </div>
 
@@ -1390,7 +1755,7 @@ export function ParentPortal({
                       ← Voltar à conferência dos dados
                     </button>
                     <span className="text-[11px]">
-                      Dúvidas sobre a assinatura digital? Ligue para a secretaria do colégio.
+                      Ambos os responsáveis devem assinar para que o contrato seja liberado para pagamento.
                     </span>
                   </div>
                 </div>
@@ -1553,13 +1918,8 @@ export function ParentPortal({
           {paymentMethod === 'PIX' && (
             <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 text-center space-y-4">
               <div className="inline-block bg-white p-3 rounded-2xl shadow-xs border border-slate-200">
-                {pixData?.qrCode ? (
-                  <img
-                    src={pixData.qrCode}
-                    alt="QR Code PIX Itaú"
-                    className="w-48 h-48 mx-auto"
-                    referrerPolicy="no-referrer"
-                  />
+                {pixData?.copyPaste ? (
+                  <QRCodeSVG value={pixData.copyPaste} size={184} level="H" includeMargin />
                 ) : (
                   <div className="w-48 h-48 flex items-center justify-center text-slate-400">
                     Gerando QR Code Itaú...
@@ -2074,6 +2434,14 @@ export function ParentPortal({
           {/* Action buttons */}
           <div className="flex flex-wrap justify-center gap-3 pt-2">
             <button
+              onClick={() => generateContractPdf(student, template, dynamicContractText)}
+              className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs flex items-center gap-2 shadow-xs cursor-pointer transition"
+            >
+              <Download className="w-4 h-4" />
+              <span>Baixar Contrato Assinado em PDF</span>
+            </button>
+
+            <button
               onClick={() => window.print()}
               className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs flex items-center gap-2 shadow-xs cursor-pointer transition"
             >
@@ -2090,6 +2458,8 @@ export function ParentPortal({
           </div>
         </div>
       )}
+        </motion.div>
+      </AnimatePresence>
 
       {/* Parent Data Correction Modal (Respecting Secretariat Security Permissions) */}
       {isEditingData && (

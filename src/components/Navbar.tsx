@@ -29,7 +29,11 @@ import {
   FileText,
   Clock,
   Layers,
+  BellRing,
+  Search,
+  Keyboard,
 } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
 
 interface NavbarProps {
   currentTab: 'spreadsheet' | 'contract' | 'autentique' | 'itau' | 'settings' | 'portal';
@@ -41,7 +45,9 @@ interface NavbarProps {
   selectedStudent: Student;
   onSelectStudent: (student: Student) => void;
   settings: IntegrationSettings;
-  onQuickAction?: (action: 'import' | 'new_student' | 'batch_send') => void;
+  onQuickAction?: (action: 'import' | 'new_student' | 'batch_send' | 'reminder') => void;
+  onOpenCommandPalette?: () => void;
+  onOpenShortcutsHelp?: () => void;
 }
 
 export function Navbar({
@@ -52,6 +58,8 @@ export function Navbar({
   onSelectStudent,
   settings,
   onQuickAction,
+  onOpenCommandPalette,
+  onOpenShortcutsHelp,
 }: NavbarProps) {
   // Dropdown states for each main menu
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
@@ -74,6 +82,10 @@ export function Navbar({
 
   const pendingSignatureCount = students.filter(
     (s) => s.status === 'enviado_autentique'
+  ).length;
+
+  const notStartedCount = students.filter(
+    (s) => s.status === 'importado'
   ).length;
 
   // Close dropdown when clicking outside
@@ -106,7 +118,7 @@ export function Navbar({
   const handleSubmenuClick = (
     tab: 'spreadsheet' | 'contract' | 'autentique' | 'itau' | 'settings' | 'portal',
     subOption?: string,
-    action?: 'import' | 'new_student' | 'batch_send'
+    action?: 'import' | 'new_student' | 'batch_send' | 'reminder'
   ) => {
     setActiveDropdown(null);
     setIsMobileMenuOpen(false);
@@ -118,66 +130,29 @@ export function Navbar({
 
   return (
     <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200/80 transition-all shadow-2xs">
-      {/* Top Micro Ticker & Health Bar */}
-      <div className="bg-slate-900 text-slate-300 text-[11px] py-1 px-4 sm:px-6 lg:px-8 border-b border-slate-800">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <div className="flex items-center space-x-3 overflow-hidden text-ellipsis whitespace-nowrap">
-            <span className="inline-flex items-center gap-1.5 text-emerald-400 font-semibold">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-              API Autentique v2: Online
-            </span>
-            <span className="text-slate-600 hidden sm:inline">•</span>
-            <span className="inline-flex items-center gap-1.5 text-sky-400 font-semibold hidden sm:inline-flex">
-              <span className="w-1.5 h-1.5 rounded-full bg-sky-400"></span>
-              API Itaú Cobrança: Conectado
-            </span>
-            <span className="text-slate-600 hidden md:inline">•</span>
-            <span className="text-slate-400 hidden md:inline">
-              Campanha Rematrícula 2026 (Parcelamento Regressivo Ativo)
-            </span>
-          </div>
-
-          <div className="flex items-center space-x-3 text-[11px]">
-            <span className="text-slate-400 hidden lg:inline">
-              Base Total: <strong className="text-white font-mono">{students.length}</strong> alunos
-            </span>
-            <span className="text-slate-600 hidden lg:inline">•</span>
-            <span className="text-emerald-400">
-              Confirmados: <strong className="font-mono">{paidCount}</strong>/{students.length}
-            </span>
-          </div>
-        </div>
-      </div>
-
       {/* Main Header Container */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16 sm:h-17">
+        <div className="flex items-center justify-between h-16 gap-3">
           {/* Brand & School Logo */}
           <div
-            className="flex items-center space-x-3 cursor-pointer select-none group shrink-0"
+            className="flex items-center space-x-2.5 cursor-pointer select-none group shrink-0"
             onClick={() => handleSubmenuClick('spreadsheet')}
             id="brand-logo-button"
           >
-            <div className="relative">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-700 via-indigo-600 to-blue-500 flex items-center justify-center text-white font-bold shadow-sm shadow-indigo-500/20 group-hover:scale-105 transition-transform">
-                <GraduationCap className="w-5 h-5" />
-              </div>
-              <span className="absolute -bottom-0.5 -right-0.5 flex h-2.5 w-2.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500 ring-2 ring-white"></span>
-              </span>
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-700 via-indigo-600 to-blue-500 flex items-center justify-center text-white font-bold shadow-xs shadow-indigo-500/20 group-hover:scale-105 transition-transform">
+              <GraduationCap className="w-4.5 h-4.5" />
             </div>
             <div>
               <div className="flex items-center space-x-2">
-                <span className="font-extrabold text-lg tracking-tight text-slate-900 group-hover:text-indigo-600 transition-colors">
+                <span className="font-extrabold text-base tracking-tight text-slate-900 group-hover:text-indigo-600 transition-colors whitespace-nowrap">
                   EduRematrícula
                 </span>
-                <span className="bg-indigo-50 text-indigo-700 text-[10px] font-extrabold px-2 py-0.5 rounded-md border border-indigo-200/70 font-mono tracking-tight">
+                <span className="bg-indigo-50 text-indigo-700 text-[10px] font-bold px-1.5 py-0.5 rounded-md border border-indigo-200/70 tabular-nums tracking-tight">
                   2026
                 </span>
               </div>
-              <p className="text-[11px] text-slate-500 font-medium tracking-tight">
-                Colégio Modelo Alpha • Gestão Integrada
+              <p className="text-[11px] text-slate-500 font-medium tracking-tight hidden sm:block whitespace-nowrap">
+                Colégio Modelo Alpha • <span className="tabular-nums font-semibold text-emerald-700">{paidCount}/{students.length}</span> confirmados
               </p>
             </div>
           </div>
@@ -205,16 +180,23 @@ export function Navbar({
                   }
                   if (currentTab !== 'spreadsheet') onSelectTab('spreadsheet');
                 }}
-                className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 cursor-pointer select-none ${
+                className={`relative px-3 py-2 rounded-xl text-xs font-semibold transition-colors flex items-center space-x-1.5 cursor-pointer select-none whitespace-nowrap shrink-0 ${
                   currentTab === 'spreadsheet'
-                    ? 'bg-white text-slate-900 shadow-xs border border-slate-200/90'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                    ? 'text-slate-900'
+                    : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                <FileSpreadsheet className="w-3.5 h-3.5 text-indigo-600" />
-                <span>Alunos & Planilha</span>
+                {currentTab === 'spreadsheet' && (
+                  <motion.span
+                    layoutId="navbar-active-pill"
+                    transition={{ type: 'spring', stiffness: 450, damping: 34 }}
+                    className="absolute inset-0 bg-white rounded-xl shadow-xs border border-slate-200/90 -z-0"
+                  />
+                )}
+                <FileSpreadsheet className="w-3.5 h-3.5 text-indigo-600 relative z-10" />
+                <span className="relative z-10">Alunos</span>
                 <span
-                  className={`text-[10px] px-1.5 py-0.2 rounded font-mono font-bold ${
+                  className={`relative z-10 text-[10px] px-1.5 py-0.2 rounded tabular-nums font-bold ${
                     currentTab === 'spreadsheet'
                       ? 'bg-indigo-50 text-indigo-700'
                       : 'bg-slate-200/80 text-slate-600'
@@ -223,20 +205,25 @@ export function Navbar({
                   {students.length}
                 </span>
                 <ChevronDown
-                  className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${
+                  className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 relative z-10 ${
                     activeDropdown === 'students' ? 'rotate-180 text-indigo-600' : ''
                   }`}
                 />
               </button>
 
               {/* Submenu Flyout for Students */}
-              {activeDropdown === 'students' && (
-                <div
-                  id="dropdown-students-menu"
-                  className="absolute left-0 mt-2 w-72 bg-white rounded-2xl shadow-xl border border-slate-200/90 p-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150"
-                  onMouseEnter={() => handleMouseEnter('students')}
-                  onMouseLeave={handleMouseLeave}
-                >
+              <AnimatePresence>
+                {activeDropdown === 'students' && (
+                  <motion.div
+                    id="dropdown-students-menu"
+                    initial={{ opacity: 0, y: 6, scale: 0.98 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 4, scale: 0.98 }}
+                    transition={{ duration: 0.14, ease: [0.16, 1, 0.3, 1] }}
+                    className="absolute left-0 mt-2 w-72 bg-white rounded-2xl shadow-xl border border-slate-200/90 p-2 z-50"
+                    onMouseEnter={() => handleMouseEnter('students')}
+                    onMouseLeave={handleMouseLeave}
+                  >
                   <div className="px-3 py-2 border-b border-slate-100 mb-1">
                     <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
                       Gestão de Alunos & Base
@@ -317,8 +304,30 @@ export function Navbar({
                       </div>
                     </div>
                   </button>
-                </div>
-              )}
+
+                  <button
+                    id="submenu-students-reminder"
+                    onClick={() => handleSubmenuClick('spreadsheet', undefined, 'reminder')}
+                    className="w-full text-left p-2 rounded-xl hover:bg-amber-50/70 transition flex items-start gap-2.5 group cursor-pointer"
+                  >
+                    <div className="w-8 h-8 rounded-lg bg-amber-50 group-hover:bg-amber-100 text-amber-600 flex items-center justify-center shrink-0 mt-0.5">
+                      <BellRing className="w-4 h-4" />
+                    </div>
+                    <div className="flex-1">
+                      <div className="text-xs font-bold text-slate-800 group-hover:text-amber-800 flex items-center justify-between">
+                        <span>Lembrete de Rematrícula</span>
+                        <span className="text-[9px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-mono">
+                          {notStartedCount} não iniciados
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-slate-500">
+                        Disparar e-mail automático com link direto ao Portal para pais pendentes.
+                      </div>
+                    </div>
+                  </button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
 
             {/* 2. MENU: CONTRATOS & MINUTAS */}
@@ -338,29 +347,41 @@ export function Navbar({
                   }
                   if (currentTab !== 'contract') onSelectTab('contract');
                 }}
-                className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 cursor-pointer select-none ${
+                className={`relative px-3 py-2 rounded-xl text-xs font-semibold transition-colors flex items-center space-x-1.5 cursor-pointer select-none whitespace-nowrap shrink-0 ${
                   currentTab === 'contract'
-                    ? 'bg-white text-slate-900 shadow-xs border border-slate-200/90'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                    ? 'text-slate-900'
+                    : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                <FileSignature className="w-3.5 h-3.5 text-indigo-600" />
-                <span>Contratos & Minutas</span>
+                {currentTab === 'contract' && (
+                  <motion.span
+                    layoutId="navbar-active-pill"
+                    transition={{ type: 'spring', stiffness: 450, damping: 34 }}
+                    className="absolute inset-0 bg-white rounded-xl shadow-xs border border-slate-200/90 -z-0"
+                  />
+                )}
+                <FileSignature className="w-3.5 h-3.5 text-indigo-600 relative z-10" />
+                <span className="relative z-10">Contratos</span>
                 <ChevronDown
-                  className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${
+                  className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 relative z-10 ${
                     activeDropdown === 'contract' ? 'rotate-180 text-indigo-600' : ''
                   }`}
                 />
               </button>
 
               {/* Submenu Flyout for Contract */}
-              {activeDropdown === 'contract' && (
-                <div
-                  id="dropdown-contract-menu"
-                  className="absolute left-0 mt-2 w-72 bg-white rounded-2xl shadow-xl border border-slate-200/90 p-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150"
-                  onMouseEnter={() => handleMouseEnter('contract')}
-                  onMouseLeave={handleMouseLeave}
-                >
+              <AnimatePresence>
+                {activeDropdown === 'contract' && (
+                  <motion.div
+                    id="dropdown-contract-menu"
+                    initial={{ opacity: 0, y: 6, scale: 0.98 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 4, scale: 0.98 }}
+                    transition={{ duration: 0.14, ease: [0.16, 1, 0.3, 1] }}
+                    className="absolute left-0 mt-2 w-72 bg-white rounded-2xl shadow-xl border border-slate-200/90 p-2 z-50"
+                    onMouseEnter={() => handleMouseEnter('contract')}
+                    onMouseLeave={handleMouseLeave}
+                  >
                   <div className="px-3 py-2 border-b border-slate-100 mb-1">
                     <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
                       Editor & Personalização
@@ -420,8 +441,9 @@ export function Navbar({
                       </div>
                     </div>
                   </button>
-                </div>
-              )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
 
             {/* 3. MENU: COBRANÇA & ITAÚ */}
@@ -441,16 +463,23 @@ export function Navbar({
                   }
                   if (currentTab !== 'itau') onSelectTab('itau');
                 }}
-                className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 cursor-pointer select-none ${
+                className={`relative px-3 py-2 rounded-xl text-xs font-semibold transition-colors flex items-center space-x-1.5 cursor-pointer select-none whitespace-nowrap shrink-0 ${
                   currentTab === 'itau'
-                    ? 'bg-white text-slate-900 shadow-xs border border-slate-200/90'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                    ? 'text-slate-900'
+                    : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                <CreditCard className="w-3.5 h-3.5 text-amber-600" />
-                <span>Cobrança & Itaú</span>
+                {currentTab === 'itau' && (
+                  <motion.span
+                    layoutId="navbar-active-pill"
+                    transition={{ type: 'spring', stiffness: 450, damping: 34 }}
+                    className="absolute inset-0 bg-white rounded-xl shadow-xs border border-slate-200/90 -z-0"
+                  />
+                )}
+                <CreditCard className="w-3.5 h-3.5 text-amber-600 relative z-10" />
+                <span className="relative z-10">Cobrança</span>
                 <span
-                  className={`text-[10px] px-1.5 py-0.2 rounded font-mono font-bold ${
+                  className={`relative z-10 text-[10px] px-1.5 py-0.2 rounded tabular-nums font-bold ${
                     currentTab === 'itau'
                       ? 'bg-amber-50 text-amber-800'
                       : 'bg-amber-100/80 text-amber-900'
@@ -459,20 +488,25 @@ export function Navbar({
                   {paidCount}
                 </span>
                 <ChevronDown
-                  className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${
+                  className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 relative z-10 ${
                     activeDropdown === 'itau' ? 'rotate-180 text-amber-600' : ''
                   }`}
                 />
               </button>
 
               {/* Submenu Flyout for Itau / Finance */}
-              {activeDropdown === 'itau' && (
-                <div
-                  id="dropdown-itau-menu"
-                  className="absolute left-0 mt-2 w-72 bg-white rounded-2xl shadow-xl border border-slate-200/90 p-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150"
-                  onMouseEnter={() => handleMouseEnter('itau')}
-                  onMouseLeave={handleMouseLeave}
-                >
+              <AnimatePresence>
+                {activeDropdown === 'itau' && (
+                  <motion.div
+                    id="dropdown-itau-menu"
+                    initial={{ opacity: 0, y: 6, scale: 0.98 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 4, scale: 0.98 }}
+                    transition={{ duration: 0.14, ease: [0.16, 1, 0.3, 1] }}
+                    className="absolute left-0 mt-2 w-72 bg-white rounded-2xl shadow-xl border border-slate-200/90 p-2 z-50"
+                    onMouseEnter={() => handleMouseEnter('itau')}
+                    onMouseLeave={handleMouseLeave}
+                  >
                   <div className="px-3 py-2 border-b border-slate-100 mb-1">
                     <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
                       Gateway Itaú & Regras Financeiras
@@ -535,8 +569,9 @@ export function Navbar({
                       </div>
                     </div>
                   </button>
-                </div>
-              )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
 
             {/* 4. MENU: INTEGRAÇÕES & APIS */}
@@ -558,16 +593,23 @@ export function Navbar({
                     onSelectTab('autentique');
                   }
                 }}
-                className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 cursor-pointer select-none ${
+                className={`relative px-3 py-2 rounded-xl text-xs font-semibold transition-colors flex items-center space-x-1.5 cursor-pointer select-none whitespace-nowrap shrink-0 ${
                   currentTab === 'autentique' || currentTab === 'settings'
-                    ? 'bg-white text-slate-900 shadow-xs border border-slate-200/90'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                    ? 'text-slate-900'
+                    : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-                <span>Integrações & APIs</span>
+                {(currentTab === 'autentique' || currentTab === 'settings') && (
+                  <motion.span
+                    layoutId="navbar-active-pill"
+                    transition={{ type: 'spring', stiffness: 450, damping: 34 }}
+                    className="absolute inset-0 bg-white rounded-xl shadow-xs border border-slate-200/90 -z-0"
+                  />
+                )}
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 relative z-10" />
+                <span className="relative z-10">Integrações</span>
                 <span
-                  className={`text-[10px] px-1.5 py-0.2 rounded font-mono font-bold ${
+                  className={`relative z-10 text-[10px] px-1.5 py-0.2 rounded tabular-nums font-bold ${
                     currentTab === 'autentique'
                       ? 'bg-emerald-50 text-emerald-700'
                       : 'bg-emerald-100/80 text-emerald-800'
@@ -576,20 +618,25 @@ export function Navbar({
                   {signedCount}
                 </span>
                 <ChevronDown
-                  className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${
+                  className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 relative z-10 ${
                     activeDropdown === 'integrations' ? 'rotate-180 text-emerald-600' : ''
                   }`}
                 />
               </button>
 
               {/* Submenu Flyout for Integrations */}
-              {activeDropdown === 'integrations' && (
-                <div
-                  id="dropdown-integrations-menu"
-                  className="absolute right-0 mt-2 w-72 bg-white rounded-2xl shadow-xl border border-slate-200/90 p-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150"
-                  onMouseEnter={() => handleMouseEnter('integrations')}
-                  onMouseLeave={handleMouseLeave}
-                >
+              <AnimatePresence>
+                {activeDropdown === 'integrations' && (
+                  <motion.div
+                    id="dropdown-integrations-menu"
+                    initial={{ opacity: 0, y: 6, scale: 0.98 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 4, scale: 0.98 }}
+                    transition={{ duration: 0.14, ease: [0.16, 1, 0.3, 1] }}
+                    className="absolute right-0 mt-2 w-72 bg-white rounded-2xl shadow-xl border border-slate-200/90 p-2 z-50"
+                    onMouseEnter={() => handleMouseEnter('integrations')}
+                    onMouseLeave={handleMouseLeave}
+                  >
                   <div className="px-3 py-2 border-b border-slate-100 mb-1">
                     <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
                       Conexões & Assinatura Digital
@@ -652,16 +699,46 @@ export function Navbar({
                       </div>
                     </div>
                   </button>
-                </div>
-              )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           </nav>
 
-          {/* Quick Portal Switcher & Active Student */}
-          <div className="flex items-center space-x-2.5">
+          {/* Quick Portal Switcher, Command Palette & Active Student */}
+          <div className="flex items-center space-x-2 shrink-0">
+            {/* Command Palette Trigger (Ctrl+K) */}
+            {onOpenCommandPalette && (
+              <button
+                id="btn-command-palette"
+                type="button"
+                onClick={onOpenCommandPalette}
+                className="hidden sm:flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200/90 text-xs text-slate-500 hover:text-slate-800 transition cursor-pointer whitespace-nowrap shrink-0"
+                title="Paleta de comandos e busca rápida (Ctrl+K ou ⌘K)"
+              >
+                <Search className="w-3.5 h-3.5 text-slate-400" />
+                <span className="hidden xl:inline text-[11px] font-medium">Buscar...</span>
+                <kbd className="kbd-chip">⌘K</kbd>
+              </button>
+            )}
+
+            {/* Shortcuts Help Trigger (?) */}
+            {onOpenShortcutsHelp && (
+              <button
+                id="btn-shortcuts-help"
+                type="button"
+                onClick={onOpenShortcutsHelp}
+                className="hidden md:flex items-center justify-center w-8 h-8 rounded-xl bg-white hover:bg-slate-100 border border-slate-200/90 text-slate-500 hover:text-slate-900 transition cursor-pointer shrink-0"
+                title="Atalhos de teclado (?)"
+                aria-label="Atalhos de teclado"
+              >
+                <Keyboard className="w-3.5 h-3.5" />
+              </button>
+            )}
+
             {/* Student Simulation Quick Dropdown */}
-            <div className="hidden lg:flex items-center text-xs text-slate-600 bg-white px-2.5 py-1.5 rounded-xl border border-slate-200/90 shadow-2xs">
-              <span className="text-slate-400 mr-2 font-medium text-[11px]">Aluno de Teste:</span>
+            <div className="hidden lg:flex items-center text-xs text-slate-600 bg-white px-2.5 py-1.5 rounded-xl border border-slate-200/90 shadow-2xs shrink-0">
+              <span className="text-slate-400 mr-1.5 font-medium text-[11px] whitespace-nowrap">Aluno:</span>
               <select
                 id="header-student-select"
                 aria-label="Selecionar aluno para simulação"
@@ -670,7 +747,7 @@ export function Navbar({
                   const s = students.find((item) => item.id === e.target.value);
                   if (s) onSelectStudent(s);
                 }}
-                className="bg-transparent text-slate-900 font-bold text-xs py-0.5 focus:outline-none cursor-pointer max-w-[150px] truncate"
+                className="bg-transparent text-slate-900 font-semibold text-xs py-0.5 focus:outline-none cursor-pointer max-w-[130px] truncate"
               >
                 {students.map((s) => (
                   <option key={s.id} value={s.id}>
@@ -685,7 +762,7 @@ export function Navbar({
               id="btn-open-parent-portal"
               type="button"
               onClick={() => handleSubmenuClick('portal')}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center space-x-2 transition shadow-xs cursor-pointer select-none ${
+              className={`px-3 py-2 rounded-xl text-xs font-semibold flex items-center space-x-1.5 transition shadow-xs cursor-pointer select-none whitespace-nowrap shrink-0 ${
                 currentTab === 'portal'
                   ? 'bg-indigo-900 text-white ring-2 ring-indigo-400 ring-offset-2'
                   : 'bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white'
@@ -711,11 +788,16 @@ export function Navbar({
         </div>
 
         {/* Mobile Expanded Menu Drawer / Accordion */}
-        {isMobileMenuOpen && (
-          <div
-            id="mobile-navigation-drawer"
-            className="md:hidden py-4 border-t border-slate-200/80 space-y-4 animate-in fade-in slide-in-from-top-2 duration-150"
-          >
+        <AnimatePresence>
+          {isMobileMenuOpen && (
+            <motion.div
+              id="mobile-navigation-drawer"
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+              className="md:hidden py-4 border-t border-slate-200/80 space-y-4 overflow-hidden"
+            >
             {/* Student Simulation Picker on Mobile */}
             <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
               <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">
@@ -787,6 +869,13 @@ export function Navbar({
                   >
                     <Send className="w-3.5 h-3.5 text-indigo-600" />
                     <span>Disparo em Lote</span>
+                  </button>
+                  <button
+                    onClick={() => handleSubmenuClick('spreadsheet', undefined, 'reminder')}
+                    className="w-full text-left px-3 py-2 text-xs font-medium text-amber-800 hover:bg-amber-50 rounded-lg flex items-center gap-2"
+                  >
+                    <BellRing className="w-3.5 h-3.5 text-amber-600" />
+                    <span>Lembrete de Rematrícula ({notStartedCount})</span>
                   </button>
                 </div>
               )}
@@ -938,8 +1027,9 @@ export function Navbar({
                 <ExternalLink className="w-3.5 h-3.5" />
               </button>
             </div>
-          </div>
-        )}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </header>
   );

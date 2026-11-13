@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Student, ContractTemplate, StudentStatus } from '../types';
+import { Student, ContractTemplate, StudentStatus, PortalEditablePermissions } from '../types';
 import { formatCurrency } from '../utils/contractFormatter';
+import { DEFAULT_PORTAL_PERMISSIONS } from '../data/initialData';
 import {
   Edit3,
   User,
@@ -13,6 +14,13 @@ import {
   AlertCircle,
   ExternalLink,
   ShieldCheck,
+  Shield,
+  Lock,
+  Unlock,
+  Home,
+  Phone,
+  Mail,
+  UserCheck,
 } from 'lucide-react';
 
 interface Props {
@@ -38,6 +46,16 @@ export function EditStudentModal({
   );
   const [actionReason, setActionReason] = useState<string>('Correção de dados cadastrais / contato');
   const [isResending, setIsResending] = useState<boolean>(false);
+
+  // Portal editable permissions state
+  const [useCustomPermissions, setUseCustomPermissions] = useState<boolean>(
+    Boolean(student.customPortalPermissions)
+  );
+  const [portalPermissions, setPortalPermissions] = useState<PortalEditablePermissions>(() => {
+    return student.customPortalPermissions
+      ? { ...student.customPortalPermissions }
+      : { ...DEFAULT_PORTAL_PERMISSIONS };
+  });
 
   if (!isOpen) return null;
 
@@ -70,12 +88,24 @@ export function EditStudentModal({
       responsible2Email: hasSecondResponsible ? formData.responsible2Email : undefined,
       responsible2Phone: hasSecondResponsible ? formData.responsible2Phone : undefined,
       responsible2Address: hasSecondResponsible ? formData.responsible2Address : undefined,
+      customPortalPermissions: useCustomPermissions ? portalPermissions : undefined,
       historyLogs: [
         ...formData.historyLogs,
         {
           timestamp: new Date().toISOString(),
-          action: 'Dados Editados',
-          details: `Cadastro atualizado. Motivo: ${actionReason}.`,
+          action: 'Dados Editados & Permissões Atualizadas',
+          details: `Cadastro atualizado. Motivo: ${actionReason}.${
+            useCustomPermissions
+              ? ` Permissões do portal configuradas: ${[
+                  portalPermissions.allowAddress ? 'Endereço' : null,
+                  portalPermissions.allowEmail ? 'E-mails' : null,
+                  portalPermissions.allowPhone ? 'Telefones' : null,
+                  portalPermissions.allowSecondResponsible ? '2º Resp' : null,
+                ]
+                  .filter(Boolean)
+                  .join(', ')}.`
+              : ' Usando permissões globais padrão da escola.'
+          }`,
         },
       ],
     };
@@ -94,6 +124,7 @@ export function EditStudentModal({
       responsible2Email: hasSecondResponsible ? formData.responsible2Email : undefined,
       responsible2Phone: hasSecondResponsible ? formData.responsible2Phone : undefined,
       responsible2Address: hasSecondResponsible ? formData.responsible2Address : undefined,
+      customPortalPermissions: useCustomPermissions ? portalPermissions : undefined,
       status: 'enviado_autentique',
       autentiqueStatus: 'PENDENTE',
       historyLogs: [
@@ -540,6 +571,226 @@ export function EditStudentModal({
                   className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg"
                 />
               </div>
+            </div>
+          </div>
+
+          {/* Section 6: Controle de Acesso do Responsável no Portal */}
+          <div className="p-4 bg-indigo-50/40 rounded-xl border border-indigo-200/80 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-2 border-b border-indigo-100 gap-2">
+              <div className="flex items-center gap-2">
+                <Shield className="w-4 h-4 text-indigo-600 shrink-0" />
+                <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                  6. Controle de Acesso aos Dados no Portal do Responsável
+                </h3>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUseCustomPermissions(false);
+                    setPortalPermissions(DEFAULT_PORTAL_PERMISSIONS);
+                  }}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer ${
+                    !useCustomPermissions
+                      ? 'bg-indigo-600 text-white shadow-2xs'
+                      : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+                  }`}
+                >
+                  Regra Geral da Escola
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setUseCustomPermissions(true)}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer ${
+                    useCustomPermissions
+                      ? 'bg-indigo-600 text-white shadow-2xs'
+                      : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+                  }`}
+                >
+                  Personalizar para este Aluno
+                </button>
+              </div>
+            </div>
+
+            <p className="text-[11px] text-slate-600 leading-relaxed">
+              Marque abaixo via checkbox quais dados este responsável poderá editar ao clicar em <strong>"Corrigir / Atualizar Meus Dados"</strong> no portal. Os campos desmarcados serão bloqueados com cadeado 🔒 para evitar alterações indevidas.
+            </p>
+
+            {/* Quick preset buttons */}
+            <div className="flex flex-wrap items-center gap-1.5 pt-1">
+              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mr-1">Predefinições Rápidas:</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setUseCustomPermissions(true);
+                  setPortalPermissions({
+                    allowAddress: true,
+                    allowPhone: false,
+                    allowEmail: false,
+                    allowSecondResponsible: false,
+                    allowKinship: false,
+                    allowStudentAcademic: false,
+                  });
+                }}
+                className="px-2 py-0.5 bg-white hover:bg-slate-100 border border-slate-200 rounded text-[11px] text-slate-700 font-medium transition cursor-pointer"
+              >
+                Só Endereço
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setUseCustomPermissions(true);
+                  setPortalPermissions({
+                    allowAddress: false,
+                    allowPhone: false,
+                    allowEmail: true,
+                    allowSecondResponsible: false,
+                    allowKinship: false,
+                    allowStudentAcademic: false,
+                  });
+                }}
+                className="px-2 py-0.5 bg-white hover:bg-slate-100 border border-slate-200 rounded text-[11px] text-slate-700 font-medium transition cursor-pointer"
+              >
+                Só E-mails
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setUseCustomPermissions(true);
+                  setPortalPermissions({
+                    allowAddress: false,
+                    allowPhone: true,
+                    allowEmail: false,
+                    allowSecondResponsible: false,
+                    allowKinship: false,
+                    allowStudentAcademic: false,
+                  });
+                }}
+                className="px-2 py-0.5 bg-white hover:bg-slate-100 border border-slate-200 rounded text-[11px] text-slate-700 font-medium transition cursor-pointer"
+              >
+                Só Telefones
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setUseCustomPermissions(true);
+                  setPortalPermissions({
+                    allowAddress: true,
+                    allowPhone: true,
+                    allowEmail: true,
+                    allowSecondResponsible: true,
+                    allowKinship: true,
+                    allowStudentAcademic: false,
+                  });
+                }}
+                className="px-2 py-0.5 bg-white hover:bg-slate-100 border border-slate-200 rounded text-[11px] text-slate-700 font-medium transition cursor-pointer"
+              >
+                Liberar Todos os Dados
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setUseCustomPermissions(true);
+                  setPortalPermissions({
+                    allowAddress: false,
+                    allowPhone: false,
+                    allowEmail: false,
+                    allowSecondResponsible: false,
+                    allowKinship: false,
+                    allowStudentAcademic: false,
+                  });
+                }}
+                className="px-2 py-0.5 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded text-[11px] text-rose-700 font-medium transition cursor-pointer"
+              >
+                Bloquear Tudo (Leitura)
+              </button>
+            </div>
+
+            {/* Checkboxes Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1 text-xs">
+              <label className={`p-3 rounded-xl border flex items-center justify-between gap-2 cursor-pointer transition ${
+                portalPermissions.allowAddress ? 'bg-emerald-50/70 border-emerald-300' : 'bg-slate-50 border-slate-200 opacity-75'
+              }`}>
+                <div className="flex items-center gap-2">
+                  <Home className="w-4 h-4 text-slate-600" />
+                  <div>
+                    <span className="font-bold text-slate-800">Endereço Residencial</span>
+                    <p className="text-[10px] text-slate-500">Rua, número, bairro, CEP e cidade</p>
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={portalPermissions.allowAddress}
+                  onChange={(e) => {
+                    setUseCustomPermissions(true);
+                    setPortalPermissions({ ...portalPermissions, allowAddress: e.target.checked });
+                  }}
+                  className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500 cursor-pointer"
+                />
+              </label>
+
+              <label className={`p-3 rounded-xl border flex items-center justify-between gap-2 cursor-pointer transition ${
+                portalPermissions.allowEmail ? 'bg-emerald-50/70 border-emerald-300' : 'bg-slate-50 border-slate-200 opacity-75'
+              }`}>
+                <div className="flex items-center gap-2">
+                  <Mail className="w-4 h-4 text-slate-600" />
+                  <div>
+                    <span className="font-bold text-slate-800">E-mails de Contato & Notificação</span>
+                    <p className="text-[10px] text-slate-500">Envio de contrato Autentique e avisos</p>
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={portalPermissions.allowEmail}
+                  onChange={(e) => {
+                    setUseCustomPermissions(true);
+                    setPortalPermissions({ ...portalPermissions, allowEmail: e.target.checked });
+                  }}
+                  className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500 cursor-pointer"
+                />
+              </label>
+
+              <label className={`p-3 rounded-xl border flex items-center justify-between gap-2 cursor-pointer transition ${
+                portalPermissions.allowPhone ? 'bg-emerald-50/70 border-emerald-300' : 'bg-slate-50 border-slate-200 opacity-75'
+              }`}>
+                <div className="flex items-center gap-2">
+                  <Phone className="w-4 h-4 text-slate-600" />
+                  <div>
+                    <span className="font-bold text-slate-800">Telefones & WhatsApp</span>
+                    <p className="text-[10px] text-slate-500">Contato direto e envio de avisos</p>
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={portalPermissions.allowPhone}
+                  onChange={(e) => {
+                    setUseCustomPermissions(true);
+                    setPortalPermissions({ ...portalPermissions, allowPhone: e.target.checked });
+                  }}
+                  className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500 cursor-pointer"
+                />
+              </label>
+
+              <label className={`p-3 rounded-xl border flex items-center justify-between gap-2 cursor-pointer transition ${
+                portalPermissions.allowSecondResponsible ? 'bg-emerald-50/70 border-emerald-300' : 'bg-slate-50 border-slate-200 opacity-75'
+              }`}>
+                <div className="flex items-center gap-2">
+                  <UserCheck className="w-4 h-4 text-slate-600" />
+                  <div>
+                    <span className="font-bold text-slate-800">Dados do 2º Responsável Solidário</span>
+                    <p className="text-[10px] text-slate-500">Nome, CPF e contatos do segundo signatário</p>
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={portalPermissions.allowSecondResponsible}
+                  onChange={(e) => {
+                    setUseCustomPermissions(true);
+                    setPortalPermissions({ ...portalPermissions, allowSecondResponsible: e.target.checked });
+                  }}
+                  className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500 cursor-pointer"
+                />
+              </label>
             </div>
           </div>
 

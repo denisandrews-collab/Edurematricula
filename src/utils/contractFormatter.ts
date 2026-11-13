@@ -357,9 +357,8 @@ export function replaceContractPlaceholders(
   return result;
 }
 
-import * as XLSX from 'xlsx';
-
-export function exportStudentsToExcel(students: Student[], fileName: string = 'rematriculas_colegio_2026.xlsx') {
+export async function exportStudentsToExcel(students: Student[], fileName: string = 'rematriculas_colegio_2026.xlsx') {
+  const XLSX = await import('xlsx');
   const data = students.map((s) => {
     const isSigned =
       s.status === 'assinado' ||

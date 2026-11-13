@@ -272,7 +272,7 @@ export function RedePaymentForm({
             className="h-24 w-24 border-t-4 border-r-4 border-orange-500 rounded-full"
           />
           <div className="absolute inset-0 flex items-center justify-center">
-            <CreditCard className="h-8 w-8 text-orange-500 animate-pulse" />
+            <CreditCard className="h-8 w-8 text-orange-500" />
           </div>
         </div>
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mt-8 space-y-2">
@@ -494,7 +494,7 @@ export function RedePaymentForm({
               <div className="flex flex-col items-center justify-center py-4 text-center space-y-5">
                 <div className="p-4 bg-white rounded-3xl shadow-2xl relative">
                   {pixData && <QRCodeSVG value={pixData.qrcode} size={180} level="H" includeMargin />}
-                  <div className="absolute -top-3 -right-3 h-10 w-10 bg-emerald-500 rounded-2xl flex items-center justify-center text-white shadow-lg animate-bounce">
+                  <div className="absolute -top-3 -right-3 h-10 w-10 bg-emerald-500 rounded-2xl flex items-center justify-center text-white shadow-lg">
                     <QrCode className="h-5 w-5" />
                   </div>
                 </div>
